@@ -1,0 +1,23 @@
+[package]
+name = "readerx"
+version = "0.1.0"
+description = "ReaderX: a bookshelf that reopens every book where you left it"
+edition = "2021"
+
+[lib]
+name = "readerx_lib"
+crate-type = ["rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["protocol-asset"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# chrono: ISO 8601 stamps and the corrupt-file name stamp, with the minimum features
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+sha2 = "0.10"
+
+[dev-dependencies]
+tempfile = "3"
