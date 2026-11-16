@@ -85,6 +85,25 @@ fn set_page_theme(state: State<Shared>, theme: String) -> Result<(), String> {
 
 pub fn run() {
     tauri::Builder::default()
+        // single-instance must be registered first
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            if let Some(w) = app.get_webview_window("main") {
+                let _ = w.unminimize();
+                let _ = w.show();
+                let _ = w.set_focus();
+            }
+        }))
+        .plugin(
+            // VISIBLE excluded: the window starts hidden and the screen shows it after first paint
+            tauri_plugin_window_state::Builder::default()
+                .with_state_flags(
+                    tauri_plugin_window_state::StateFlags::all()
+                        - tauri_plugin_window_state::StateFlags::VISIBLE,
+                )
+                .build(),
+        )
+        .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_opener::init())
         .setup(|app| {
             let dir = app.path().app_data_dir()?;
             std::fs::create_dir_all(dir.join("covers"))?;
