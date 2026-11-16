@@ -87,13 +87,12 @@ h1, h2, h3, p { margin: 0; }
 .empty-state p { color: var(--muted); margin-bottom: 20px; overflow-wrap: anywhere; }
 
 /* Continue card */
-.continue { margin-bottom: 40px; }
+.continue { position: relative; max-width: 640px; margin-bottom: 40px; }
 .continue-open {
   display: flex;
   align-items: stretch;
   gap: 28px;
   width: 100%;
-  max-width: 640px;
   padding: 20px;
   font: inherit;
   color: inherit;
@@ -174,6 +173,8 @@ h1, h2, h3, p { margin: 0; }
 }
 .card:hover .card-menu-btn,
 .card:focus-within .card-menu-btn,
+.continue:hover .card-menu-btn,
+.continue:focus-within .card-menu-btn,
 .card-menu-btn[aria-expanded="true"] { opacity: 1; }
 .card-menu {
   position: absolute;

@@ -97,7 +97,8 @@ function continueCard(book, now) {
       h("span", { class: "continue-body" },
         h("span", { class: "eyebrow" }, "Continue reading"),
         h("span", { class: "continue-title" }, book.displayTitle),
-        ...bookMeta(book, now))));
+        ...bookMeta(book, now))),
+    ...cardMenu(book));
 }
 
 let openMenu = null; // { button, menu }
