@@ -1,4 +1,6 @@
-const { invoke } = window.__TAURI__.core;
+import { relativeDay, progressText } from "./lib/format.js";
+
+const { invoke, convertFileSrc } = window.__TAURI__.core;
 const { listen } = window.__TAURI__.event;
 const { getCurrentWindow } = window.__TAURI__.window;
 const { open: openDialog } = window.__TAURI__.dialog;
@@ -62,6 +64,65 @@ async function pickFolder() {
   }
 }
 
+const SECTIONS = [
+  ["reading", "Reading"],
+  ["to-read", "To read"],
+  ["finished", "Finished"],
+];
+
+function openBook() {}
+
+function cover(book) {
+  const tile = () => h("div", { class: "tile" }, h("span", {}, book.displayTitle));
+  if (!book.coverPath) return h("div", { class: "cover" }, tile());
+  const img = h("img", { src: convertFileSrc(book.coverPath), alt: "", loading: "lazy" });
+  const box = h("div", { class: "cover" }, img);
+  img.addEventListener("error", () => box.replaceChildren(tile()));
+  return box;
+}
+
+function bookMeta(book, now) {
+  const progress = progressText(book);
+  const date = book.lastOpenedAt ? relativeDay(book.lastOpenedAt, now) : null;
+  return [
+    progress ? h("span", { class: "meta" }, progress) : null,
+    date ? h("span", { class: "meta" }, date) : null,
+  ];
+}
+
+function continueCard(book, now) {
+  return h("section", { class: "continue", "aria-label": "Continue reading" },
+    h("button", { class: "continue-open", type: "button", "data-id": book.id, onclick: () => openBook(book) },
+      cover(book),
+      h("span", { class: "continue-body" },
+        h("span", { class: "eyebrow" }, "Continue reading"),
+        h("span", { class: "continue-title" }, book.displayTitle),
+        ...bookMeta(book, now))));
+}
+
+function card(book, now) {
+  return h("li", { class: "card" },
+    h("button", { class: "card-open", type: "button", "data-id": book.id, onclick: () => openBook(book) },
+      cover(book),
+      h("span", { class: "card-title" }, book.displayTitle),
+      ...bookMeta(book, now)));
+}
+
+function shelfContent() {
+  const now = new Date();
+  const nodes = [];
+  const current = state.books.find((b) => b.id === state.continueId);
+  if (current) nodes.push(continueCard(current, now));
+  for (const [section, label] of SECTIONS) {
+    const books = state.books.filter((b) => b.section === section && b.id !== state.continueId);
+    if (books.length === 0) continue;
+    nodes.push(h("section", { class: "section" },
+      h("h2", { class: "section-title" }, label),
+      h("ul", { class: "grid" }, ...books.map((b) => card(b, now)))));
+  }
+  return nodes;
+}
+
 function emptyState(title, text, buttonLabel) {
   return h("section", { class: "empty-state" },
     h("h2", {}, title),
@@ -84,8 +145,7 @@ function render() {
   } else if (folderStatus === "empty") {
     shelf.replaceChildren(emptyState(`No PDFs found in ${settings.booksFolder}`, null, "Change folder"));
   } else {
-    shelf.replaceChildren(h("ul", { class: "title-list" },
-      ...state.books.map((book) => h("li", {}, book.displayTitle))));
+    shelf.replaceChildren(...shelfContent());
   }
 }
 
