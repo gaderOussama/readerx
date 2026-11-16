@@ -3,5 +3,19 @@
   "identifier": "default",
   "description": "Permissions for the main window",
   "windows": ["main"],
-  "permissions": ["core:default"]
+  "permissions": [
+    "core:default",
+    "core:event:default",
+    "core:window:allow-show",
+    "core:window:allow-destroy",
+    "allow-get-state",
+    "allow-choose-folder",
+    "allow-dismiss-notice",
+    "allow-open-book",
+    "allow-save-position",
+    "allow-set-meta",
+    "allow-save-cover",
+    "allow-set-finished",
+    "allow-set-page-theme"
+  ]
 }
