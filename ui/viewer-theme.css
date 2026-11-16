@@ -1,0 +1,11 @@
+/* Injected into the PDF.js viewer by reader.js. */
+
+/* One book only: no open, print, download or bookmark controls. */
+#secondaryOpenFile,
+#printButton,
+#secondaryPrint,
+#downloadButton,
+#secondaryDownload,
+#viewBookmark {
+  display: none !important;
+}

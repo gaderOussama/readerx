@@ -1,5 +1,6 @@
 const { invoke, convertFileSrc } = window.__TAURI__.core;
 const { getCurrentWindow } = window.__TAURI__.window;
+const { openUrl } = window.__TAURI__.opener;
 
 const $ = (id) => document.getElementById(id);
 
@@ -48,9 +49,52 @@ document.addEventListener("webviewerloaded", (e) => {
     options.set("pageColorsBackground", cssColor("bg"));
     options.set("pageColorsForeground", cssColor("text"));
   }
-  win.document.addEventListener("keydown", onViewerKey);
+  lockDown(win);
   attach(session, win);
 });
+
+function openExternal(href) {
+  let url;
+  try {
+    url = new URL(href);
+  } catch {
+    return;
+  }
+  if (["http:", "https:", "mailto:"].includes(url.protocol)) {
+    openUrl(url.href).catch((err) => console.error("could not open link", err));
+  }
+}
+
+// The viewer shows one book and nothing else: no other files in, no print or
+// save out, and links leave through the system browser.
+function lockDown(win) {
+  const doc = win.document;
+  const sheet = doc.createElement("link");
+  sheet.rel = "stylesheet";
+  sheet.href = new URL("viewer-theme.css", document.baseURI).href;
+  doc.head.append(sheet);
+
+  for (const type of ["dragover", "drop"]) {
+    doc.addEventListener(type, (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+    }, true);
+  }
+  // A target="_blank" link never calls window.open, so catch the click too.
+  // Links inside the document are "#..." and stay with the viewer.
+  doc.addEventListener("click", (e) => {
+    const link = e.target.closest?.("a[href]");
+    if (!link || link.getAttribute("href").startsWith("#")) return;
+    e.preventDefault();
+    e.stopPropagation();
+    openExternal(link.href);
+  }, true);
+  win.open = (url) => {
+    openExternal(url);
+    return null;
+  };
+  doc.addEventListener("keydown", onViewerKey, true);
+}
 
 async function attach(session, win) {
   const app = win.PDFViewerApplication;
@@ -108,6 +152,12 @@ function viewerIsBusy(doc) {
 }
 
 function onViewerKey(e) {
+  // Open, print and save shortcuts would undo the lockdown.
+  if ((e.ctrlKey || e.metaKey) && ["o", "p", "s"].includes(e.key.toLowerCase())) {
+    e.preventDefault();
+    e.stopPropagation();
+    return;
+  }
   if (e.key !== "Escape" || viewerIsBusy(e.currentTarget)) return;
   e.preventDefault();
   back();
