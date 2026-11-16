@@ -45,6 +45,10 @@ async function openBook(book) {
     position: opened.position,
     theme: state.settings.pageTheme,
     onExit: closeReader,
+    onTheme: (theme) => {
+      state.settings.pageTheme = theme;
+      applyTheme(theme);
+    },
   });
 }
 

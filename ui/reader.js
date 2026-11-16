@@ -5,6 +5,7 @@ const { openUrl } = window.__TAURI__.opener;
 const $ = (id) => document.getElementById(id);
 
 const SAVE_DELAY_MS = 1000;
+const PALETTE = ["bg", "surface", "text", "muted", "line"];
 const VIEWER = "vendor/pdfjs/web/viewer.html";
 
 // The one open book, or null. Every async step re-checks that it is still the
@@ -49,6 +50,7 @@ document.addEventListener("webviewerloaded", (e) => {
     options.set("pageColorsBackground", cssColor("bg"));
     options.set("pageColorsForeground", cssColor("text"));
   }
+  themeViewer(win);
   lockDown(win);
   attach(session, win);
 });
@@ -65,15 +67,19 @@ function openExternal(href) {
   }
 }
 
-// The viewer shows one book and nothing else: no other files in, no print or
-// save out, and links leave through the system browser.
-function lockDown(win) {
+function themeViewer(win) {
   const doc = win.document;
+  for (const name of PALETTE) doc.documentElement.style.setProperty(`--rx-${name}`, cssColor(name));
   const sheet = doc.createElement("link");
   sheet.rel = "stylesheet";
   sheet.href = new URL("viewer-theme.css", document.baseURI).href;
   doc.head.append(sheet);
+}
 
+// The viewer shows one book and nothing else: no other files in, no print or
+// save out, and links leave through the system browser.
+function lockDown(win) {
+  const doc = win.document;
   for (const type of ["dragover", "drop"]) {
     doc.addEventListener(type, (e) => {
       e.preventDefault();
@@ -174,14 +180,44 @@ async function back() {
   await session.onExit();
 }
 
-export function openReader({ book, path, position, theme, onExit }) {
-  cur = { id: book.id, path, position, theme, onExit, queue: Promise.resolve(), exiting: false };
+function markTheme(theme) {
+  for (const button of document.querySelectorAll("[data-theme-choice]")) {
+    button.setAttribute("aria-pressed", String(button.dataset.themeChoice === theme));
+  }
+}
+
+// The viewer reads page colors only at start, so a switch reloads it at the saved spot.
+async function switchTheme(theme) {
+  const session = cur;
+  if (!session || session.exiting || session.switching || theme === session.theme) return;
+  session.switching = true;
+  try {
+    await flush(session);
+    await invoke("set_page_theme", { theme });
+    if (cur !== session) return;
+    session.theme = theme;
+    session.onTheme(theme);
+    markTheme(theme);
+    loadViewer(session);
+  } catch (err) {
+    console.error("theme switch failed", err);
+  } finally {
+    session.switching = false;
+  }
+}
+
+export function openReader({ book, path, position, theme, onExit, onTheme }) {
+  cur = { id: book.id, path, position, theme, onExit, onTheme, queue: Promise.resolve(), exiting: false };
   $("reader-title").textContent = book.displayTitle;
+  markTheme(theme);
   $("reader-view").hidden = false;
   loadViewer(cur);
 }
 
 $("reader-back").addEventListener("click", back);
+for (const button of document.querySelectorAll("[data-theme-choice]")) {
+  button.addEventListener("click", () => switchTheme(button.dataset.themeChoice));
+}
 
 getCurrentWindow()
   .onCloseRequested(async () => {
