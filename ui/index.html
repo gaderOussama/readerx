@@ -1,5 +1,36 @@
 <!doctype html>
-<html lang="en">
-<head><meta charset="utf-8"><title>ReaderX</title></head>
-<body>ReaderX</body>
+<html lang="en" data-theme="paper">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ReaderX</title>
+  <link rel="stylesheet" href="styles.css">
+  <script type="module" src="app.js"></script>
+</head>
+<body>
+  <div id="shelf-view">
+    <header class="header">
+      <h1>ReaderX</h1>
+      <button id="change-folder" class="btn" type="button" hidden>Change folder</button>
+    </header>
+    <div id="notice" class="notice" role="status" hidden>
+      <span id="notice-text"></span>
+      <button id="notice-dismiss" class="btn" type="button">Dismiss</button>
+    </div>
+    <main id="shelf"></main>
+  </div>
+
+  <div id="reader-view" hidden>
+    <header class="reader-bar">
+      <button id="reader-back" class="btn" type="button">&larr; Back</button>
+      <div id="reader-title" class="reader-title"></div>
+      <div class="theme-toggle" role="group" aria-label="Page theme">
+        <button type="button" data-theme-choice="original" aria-pressed="false">Original</button>
+        <button type="button" data-theme-choice="paper" aria-pressed="false">Paper</button>
+        <button type="button" data-theme-choice="night" aria-pressed="false">Night</button>
+      </div>
+    </header>
+    <div id="viewer-host"></div>
+  </div>
+</body>
 </html>

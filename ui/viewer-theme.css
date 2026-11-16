@@ -1,0 +1,107 @@
+/* Injected into the PDF.js viewer by reader.js.
+   --rx-* hold the app palette; reader.js copies them onto :root from styles.css,
+   so the palette lives in one place. */
+
+/* One book only: no open, print, download or bookmark controls. */
+#secondaryOpenFile,
+#printButton,
+#secondaryPrint,
+#downloadButton,
+#secondaryDownload,
+#viewBookmark {
+  display: none !important;
+}
+
+/* Viewer colors. Names without a viewer.css default are the hooks the viewer
+   itself reads (--color-accent-primary and the like). */
+:root {
+  --main-color: var(--rx-text);
+  --text-color: var(--rx-text);
+  --text-secondary-color: var(--rx-muted);
+  --body-bg-color: var(--rx-line);
+  --background-color-canvas: var(--rx-surface);
+  --background-color-box: var(--rx-surface);
+
+  --toolbar-bg-color: var(--rx-surface);
+  --toolbar-border-color: var(--rx-line);
+  --toolbar-icon-bg-color: var(--rx-text);
+  --toolbar-icon-hover-bg-color: var(--rx-text);
+  --toggled-btn-color: var(--rx-text);
+  --toggled-btn-text-color: var(--rx-text);
+  --toggled-btn-bg-color: color-mix(in srgb, var(--rx-text) 16%, transparent);
+  --toggled-hover-active-btn-color: color-mix(in srgb, var(--rx-text) 24%, transparent);
+  --sidebar-narrow-bg-color: var(--rx-surface);
+  --sidebar-toolbar-bg-color: var(--rx-surface);
+  --dropdown-btn-bg-color: var(--rx-line);
+  --separator-color: var(--rx-line);
+  --field-color: var(--rx-text);
+  --field-bg-color: var(--rx-bg);
+  --field-border-color: var(--rx-muted);
+  --doorhanger-bg-color: var(--rx-surface);
+  --doorhanger-border-color: var(--rx-line);
+  --doorhanger-hover-color: var(--rx-text);
+  --doorhanger-separator-color: var(--rx-line);
+  --scrollbar-color: var(--rx-muted);
+  --scrollbar-bg-color: var(--rx-surface);
+
+  /* No blue: accents, focus rings, links, progress bar */
+  --color-accent-primary: var(--rx-text);
+  --color-accent-primary-hover: var(--rx-muted);
+  --color-accent-primary-active: var(--rx-muted);
+  --focus-outline-color: var(--rx-text);
+  --link-color: var(--rx-text);
+  --link-color-hover: var(--rx-muted);
+  --border-color-interactive: var(--rx-muted);
+  --button-background-color-primary: var(--rx-text);
+  --button-background-color-primary-hover: var(--rx-muted);
+  --button-background-color-primary-active: var(--rx-muted);
+  --button-text-color-primary: var(--rx-bg);
+  --outline-color: var(--rx-text);
+  --progressBar-color: var(--rx-text);
+  --progressBar-bg-color: var(--rx-line);
+  --progressBar-blend-color: var(--rx-muted);
+  --comment-count-bg-color: var(--rx-line);
+  --comment-indicator-active-fg-color: var(--rx-text);
+  --annotation-unfocused-field-background: url("data:image/svg+xml;charset=UTF-8,<svg width='1px' height='1px' xmlns='http://www.w3.org/2000/svg'><rect width='100%' height='100%' style='fill:rgba(128, 128, 128, 0.16);'/></svg>");
+  --annotation-unfocused-field-filter: url("data:image/svg+xml;charset=UTF-8,<svg xmlns='http://www.w3.org/2000/svg'><filter id='pdfjsFillableField' x='0%' y='0%' width='100%' height='100%' color-interpolation-filters='sRGB'><feFlood flood-color='rgb(128,128,128)' flood-opacity='0.16' result='f'/><feComposite in='f' in2='SourceGraphic' operator='over'/></filter></svg>#pdfjsFillableField");
+  --xfa-unfocused-field-background: var(--annotation-unfocused-field-background);
+}
+
+/* viewer.css sets these on narrower selectors, so :root cannot reach them. */
+#viewsManager {
+  --sidebar-bg-color: var(--rx-surface);
+  --header-bg: var(--rx-surface);
+  --indicator-color: var(--rx-text);
+  --status-undo-bg: var(--rx-line);
+  --status-waiting-bg: var(--rx-line);
+  --image-border-color: var(--rx-line);
+  --image-hover-border-color: var(--rx-muted);
+  --image-page-number-bg: var(--rx-line);
+  --image-current-page-number-fg: var(--rx-bg);
+}
+
+.sidebar {
+  --sidebar-bg-color: var(--rx-surface);
+  --sidebar-border-color: var(--rx-line);
+}
+
+.dialog {
+  --text-secondary-color: var(--rx-muted);
+  --separator-color: var(--rx-line);
+  --textarea-bg-color: var(--rx-bg);
+  --input-text-bg-color: var(--rx-bg);
+}
+
+#editorUndoBar {
+  --message-bar-bg-color: var(--rx-surface);
+  --message-bar-icon-color: var(--rx-text);
+}
+
+.colorPicker {
+  --selected-outline-color: var(--rx-text);
+  --hover-outline-color: var(--rx-muted);
+}
+
+.toolbarField:focus {
+  border-color: var(--rx-text);
+}
