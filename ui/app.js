@@ -1,4 +1,5 @@
 import { relativeDay, progressText } from "./lib/format.js";
+import { openReader } from "./reader.js";
 
 const { invoke, convertFileSrc } = window.__TAURI__.core;
 const { listen } = window.__TAURI__.event;
@@ -21,6 +22,43 @@ function h(tag, attrs = {}, ...children) {
 
 let state = null;
 let localNotice = null; // errors raised here, not by Rust
+let readerOpen = false;
+let shelfScroll = 0;
+
+async function openBook(book) {
+  closeMenu();
+  let opened;
+  try {
+    opened = await invoke("open_book", { id: book.id });
+  } catch (code) {
+    showError(code === "not_present" ? "That book is no longer in your folder." : `Could not open that book (${code}).`);
+    await refreshState();
+    render();
+    return;
+  }
+  shelfScroll = $("shelf-view").scrollTop;
+  readerOpen = true;
+  $("shelf-view").hidden = true;
+  openReader({
+    book,
+    path: opened.path,
+    position: opened.position,
+    theme: state.settings.pageTheme,
+    onExit: closeReader,
+  });
+}
+
+async function closeReader() {
+  try {
+    await refreshState();
+  } catch (code) {
+    console.error("get_state failed", code);
+  }
+  readerOpen = false;
+  $("shelf-view").hidden = false;
+  render();
+  $("shelf-view").scrollTop = shelfScroll;
+}
 
 function applyTheme(theme) {
   document.documentElement.dataset.theme = theme;
@@ -69,8 +107,6 @@ const SECTIONS = [
   ["to-read", "To read"],
   ["finished", "Finished"],
 ];
-
-function openBook() {}
 
 function cover(book) {
   const tile = () => h("div", { class: "tile" }, h("span", {}, book.displayTitle));
@@ -212,8 +248,12 @@ async function start() {
     $("shelf").replaceChildren(emptyState("Could not load your library", String(code), "Choose folder"));
   }
   await listen("library-changed", async () => {
-    await refreshState();
-    render();
+    try {
+      await refreshState();
+      if (!readerOpen) render();
+    } catch (code) {
+      console.error("get_state failed", code);
+    }
   });
   // Two frames: let the first screen paint before the hidden window appears.
   requestAnimationFrame(() => requestAnimationFrame(() => getCurrentWindow().show()));
