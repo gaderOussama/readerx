@@ -1,4 +1,5 @@
 pub mod library;
+pub mod scan;
 
 pub fn run() {
     tauri::Builder::default()
