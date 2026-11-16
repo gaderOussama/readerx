@@ -1,0 +1,89 @@
+/* Palette from spec 0001. Original uses the Paper tokens. */
+:root,
+html[data-theme="original"],
+html[data-theme="paper"] {
+  --bg: #F4F1EA;
+  --surface: #ECE8DF;
+  --text: #2B2A28;
+  --muted: #625E58;
+  --line: #DDD8CD;
+  color-scheme: light;
+}
+
+html[data-theme="night"] {
+  --bg: #1E1E1E;
+  --surface: #262626;
+  --text: #D8D5CF;
+  --muted: #9A968F;
+  --line: #363636;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+
+[hidden] { display: none !important; }
+
+html, body {
+  margin: 0;
+  height: 100%;
+  background: var(--bg);
+  color: var(--text);
+  font: 14px/1.45 system-ui, "Segoe UI", sans-serif;
+}
+
+h1, h2, h3, p { margin: 0; }
+
+:focus-visible {
+  outline: 2px solid var(--text);
+  outline-offset: 2px;
+}
+
+.btn {
+  font: inherit;
+  color: var(--text);
+  background: transparent;
+  border: 1px solid var(--muted);
+  border-radius: 6px;
+  padding: 6px 14px;
+  cursor: pointer;
+}
+.btn:hover { background: var(--surface); }
+
+/* Shelf */
+#shelf-view {
+  height: 100%;
+  overflow-y: auto;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 32px;
+  border-bottom: 1px solid var(--line);
+}
+.header h1 { font-size: 18px; font-weight: 600; letter-spacing: 0.02em; }
+
+.notice {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin: 16px 32px 0;
+  padding: 10px 14px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+
+#shelf { padding: 24px 32px 48px; }
+
+.empty-state {
+  max-width: 440px;
+  margin: 18vh auto 0;
+  text-align: center;
+}
+.empty-state h2 { font-size: 22px; font-weight: 600; margin-bottom: 8px; }
+.empty-state p { color: var(--muted); margin-bottom: 20px; overflow-wrap: anywhere; }
+
+.title-list { list-style: none; margin: 0; padding: 0; }
