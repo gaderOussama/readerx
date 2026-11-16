@@ -26,18 +26,20 @@ let readerOpen = false;
 let shelfScroll = 0;
 
 async function openBook(book) {
+  if (readerOpen) return;
+  readerOpen = true;
   closeMenu();
   let opened;
   try {
     opened = await invoke("open_book", { id: book.id });
   } catch (code) {
+    readerOpen = false;
     showError(code === "not_present" ? "That book is no longer in your folder." : `Could not open that book (${code}).`);
     await refreshState();
     render();
     return;
   }
   shelfScroll = $("shelf-view").scrollTop;
-  readerOpen = true;
   $("shelf-view").hidden = true;
   openReader({
     book,
@@ -251,6 +253,8 @@ async function start() {
   } catch (code) {
     $("shelf").replaceChildren(emptyState("Could not load your library", String(code), "Choose folder"));
   }
+  // Two frames: let the first screen paint before the hidden window appears.
+  requestAnimationFrame(() => requestAnimationFrame(() => getCurrentWindow().show()));
   await listen("library-changed", async () => {
     try {
       await refreshState();
@@ -259,8 +263,6 @@ async function start() {
       console.error("get_state failed", code);
     }
   });
-  // Two frames: let the first screen paint before the hidden window appears.
-  requestAnimationFrame(() => requestAnimationFrame(() => getCurrentWindow().show()));
 }
 
 start();
