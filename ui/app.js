@@ -92,7 +92,7 @@ function bookMeta(book, now) {
 
 function continueCard(book, now) {
   return h("section", { class: "continue", "aria-label": "Continue reading" },
-    h("button", { class: "continue-open", type: "button", "data-id": book.id, onclick: () => openBook(book) },
+    h("button", { class: "continue-open", type: "button", "data-key": `open:${book.id}`, onclick: () => openBook(book) },
       cover(book),
       h("span", { class: "continue-body" },
         h("span", { class: "eyebrow" }, "Continue reading"),
@@ -100,12 +100,61 @@ function continueCard(book, now) {
         ...bookMeta(book, now))));
 }
 
+let openMenu = null; // { button, menu }
+
+function closeMenu() {
+  if (!openMenu) return;
+  openMenu.menu.hidden = true;
+  openMenu.button.setAttribute("aria-expanded", "false");
+  openMenu = null;
+}
+
+document.addEventListener("click", (e) => {
+  if (openMenu && !openMenu.menu.contains(e.target) && !openMenu.button.contains(e.target)) closeMenu();
+});
+document.addEventListener("keydown", (e) => {
+  if (e.key !== "Escape" || !openMenu) return;
+  openMenu.button.focus();
+  closeMenu();
+});
+
+async function setFinished(book, finished) {
+  closeMenu();
+  try {
+    await invoke("set_finished", { id: book.id, finished });
+    await refreshState();
+    render();
+  } catch (code) {
+    showError(`Could not update that book (${code}).`);
+  }
+}
+
+function cardMenu(book) {
+  const finished = book.finishedAt != null;
+  const item = h("button", { class: "menu-item", type: "button", role: "menuitem",
+    onclick: () => setFinished(book, !finished) }, finished ? "Mark as unfinished" : "Mark as finished");
+  const menu = h("div", { class: "card-menu", role: "menu", hidden: "" }, item);
+  const button = h("button", { class: "card-menu-btn", type: "button", "aria-haspopup": "menu",
+    "aria-expanded": "false", "aria-label": `Options for ${book.displayTitle}`, "data-key": `menu:${book.id}`,
+    onclick: () => {
+      const wasOpen = openMenu?.menu === menu;
+      closeMenu();
+      if (wasOpen) return;
+      menu.hidden = false;
+      button.setAttribute("aria-expanded", "true");
+      openMenu = { button, menu };
+      item.focus();
+    } }, "⋯");
+  return [button, menu];
+}
+
 function card(book, now) {
   return h("li", { class: "card" },
-    h("button", { class: "card-open", type: "button", "data-id": book.id, onclick: () => openBook(book) },
+    h("button", { class: "card-open", type: "button", "data-key": `open:${book.id}`, onclick: () => openBook(book) },
       cover(book),
       h("span", { class: "card-title" }, book.displayTitle),
-      ...bookMeta(book, now)));
+      ...bookMeta(book, now)),
+    ...cardMenu(book));
 }
 
 function shelfContent() {
@@ -131,6 +180,7 @@ function emptyState(title, text, buttonLabel) {
 }
 
 function render() {
+  closeMenu();
   const { folderStatus, settings } = state;
   $("change-folder").hidden = folderStatus === "unset";
   renderNotice();
@@ -145,7 +195,9 @@ function render() {
   } else if (folderStatus === "empty") {
     shelf.replaceChildren(emptyState(`No PDFs found in ${settings.booksFolder}`, null, "Change folder"));
   } else {
+    const focusedKey = document.activeElement?.dataset?.key;
     shelf.replaceChildren(...shelfContent());
+    if (focusedKey) shelf.querySelector(`[data-key="${CSS.escape(focusedKey)}"]`)?.focus();
   }
 }
 
