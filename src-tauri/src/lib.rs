@@ -1,4 +1,5 @@
 pub mod derive;
+pub mod highlights;
 pub mod library;
 pub mod ops;
 pub mod scan;
