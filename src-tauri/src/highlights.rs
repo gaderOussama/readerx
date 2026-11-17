@@ -16,8 +16,6 @@ pub const SCHEMA_VERSION: u32 = 1;
 pub const MAX_TEXT: usize = 5_000;
 pub const MAX_NOTE: usize = 10_000;
 pub const MAX_RECTS: usize = 200;
-/// Shown in the panel while a book's damaged file notice is active.
-pub const DAMAGED_NOTICE: &str = "Highlights for this book were damaged and set aside.";
 
 /// `[x1, y1, x2, y2]` in PDF page units, `x1 < x2` and `y1 < y2`.
 pub type Rect = [f64; 4];
@@ -67,7 +65,10 @@ pub struct Item {
 #[derive(Debug, PartialEq)]
 pub struct Listing {
     pub highlights: Vec<Highlight>,
-    pub notice: Option<String>,
+    /// `Some(true)` for the rest of the session once this book's file was set
+    /// aside (the screen shows the AC-14 message and hides it when the panel
+    /// closes); null otherwise.
+    pub notice: Option<bool>,
 }
 
 /// A book id that passed `is_valid_id`, so it is safe in a path, plus the
@@ -426,7 +427,7 @@ pub fn get(ctx: &Ctx, books: &Books, now: DateTime<Utc>) -> Listing {
     let file = read(ctx, &mut slot, now);
     Listing {
         highlights: file.map(|f| f.highlights).unwrap_or_default(),
-        notice: slot.damaged.then(|| DAMAGED_NOTICE.to_string()),
+        notice: slot.damaged.then_some(true),
     }
 }
 
@@ -835,6 +836,17 @@ mod tests {
     }
 
     #[test]
+    fn intersection_needs_a_positive_area_overlap() {
+        let a = [[0.0, 0.0, 10.0, 10.0]];
+        assert!(overlaps(&a, &[[9.9, 9.9, 20.0, 20.0]]));
+        assert!(overlaps(&a, &[[2.0, 2.0, 3.0, 3.0]]));
+        assert!(!overlaps(&a, &[[10.0, 0.0, 20.0, 10.0]]), "shared vertical edge");
+        assert!(!overlaps(&a, &[[0.0, 10.0, 10.0, 20.0]]), "shared horizontal edge");
+        assert!(!overlaps(&a, &[[10.0, 10.0, 20.0, 20.0]]), "shared corner");
+        assert!(!overlaps(&a, &[[11.0, 0.0, 20.0, 10.0]]));
+    }
+
+    #[test]
     fn two_overlapping_items_in_one_call_merge_with_each_other() {
         let fx = Fx::new();
         let out = fx
@@ -1013,7 +1025,7 @@ mod tests {
             write_raw(&fx, &body);
             let l = fx.get();
             assert!(l.highlights.is_empty(), "{name}");
-            assert_eq!(l.notice.as_deref(), Some(DAMAGED_NOTICE), "{name}");
+            assert_eq!(l.notice, Some(true), "{name}");
             assert_eq!(fx.damaged_names(), vec![format!("{}.corrupt-20261117-090559.json", bid())], "{name}");
             assert!(!fx.ctx().file().exists(), "{name}");
             // the notice stays for the session
