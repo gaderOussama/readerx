@@ -96,6 +96,7 @@ export function attachHighlights(session, win, app) {
   session.hl.v = v;
 
   doc.addEventListener("mousedown", (e) => {
+    if (e.target.closest?.(".rx-hl-btn")) return;
     v.down = true;
     hideButton(v);
     if (v.menu && !v.menu.contains(e.target)) closeMenu(v);
@@ -565,7 +566,8 @@ document.addEventListener("keydown", (e) => {
 // ---- keys ----
 
 // True when the key was used here. `H` with a selection highlights it; Escape
-// first closes the Highlight button.
+// first closes the click menu or the Highlight button. Without a selection `H`
+// stays with PDF.js.
 export function highlightKey(e, session) {
   const v = session?.hl?.v;
   if (!v || !live(session)) return false;
