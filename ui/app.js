@@ -115,14 +115,23 @@ const SECTIONS = [
   ["finished", "Finished"],
 ];
 
+// Loaded covers are moved into the next render, so a re-render does not reload or flash them.
+const coverImgs = new Map();
+
 function cover(book) {
   const tile = (note) => h("div", { class: "tile" }, h("span", {}, book.displayTitle),
     note ? h("small", { class: "tile-note" }, note) : null);
   if (!book.coverPath) return h("div", { class: "cover" }, tile(failed.has(book.id) ? "Can't preview" : null));
-  const img = h("img", { src: convertFileSrc(book.coverPath), alt: "", loading: "lazy" });
-  const box = h("div", { class: "cover" }, img);
-  img.addEventListener("error", () => box.replaceChildren(tile()));
-  return box;
+  let img = coverImgs.get(book.coverPath);
+  if (!img) {
+    img = h("img", { src: convertFileSrc(book.coverPath), alt: "", loading: "lazy" });
+    img.addEventListener("error", () => {
+      coverImgs.delete(book.coverPath);
+      img.parentNode?.replaceChildren(tile());
+    });
+    coverImgs.set(book.coverPath, img);
+  }
+  return h("div", { class: "cover" }, img);
 }
 
 function bookMeta(book, now) {
