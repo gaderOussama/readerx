@@ -1,5 +1,6 @@
 import { relativeDay, progressText } from "./lib/format.js";
 import { openReader } from "./reader.js";
+import { failed } from "./covers.js";
 
 const { invoke, convertFileSrc } = window.__TAURI__.core;
 const { listen } = window.__TAURI__.event;
@@ -115,8 +116,9 @@ const SECTIONS = [
 ];
 
 function cover(book) {
-  const tile = () => h("div", { class: "tile" }, h("span", {}, book.displayTitle));
-  if (!book.coverPath) return h("div", { class: "cover" }, tile());
+  const tile = (note) => h("div", { class: "tile" }, h("span", {}, book.displayTitle),
+    note ? h("small", { class: "tile-note" }, note) : null);
+  if (!book.coverPath) return h("div", { class: "cover" }, tile(failed.has(book.id) ? "Can't preview" : null));
   const img = h("img", { src: convertFileSrc(book.coverPath), alt: "", loading: "lazy" });
   const box = h("div", { class: "cover" }, img);
   img.addEventListener("error", () => box.replaceChildren(tile()));
