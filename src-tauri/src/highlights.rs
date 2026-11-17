@@ -351,10 +351,10 @@ fn merge(absorbed: &[&Highlight], cand: &Highlight, stamp: &str) -> Result<Highl
     pool.sort_by(|a, b| a.created_at.cmp(&b.created_at));
     let oldest = pool[0];
 
-    let covers = |t: &str| contains_words(
-        &cand.text.split_whitespace().collect::<Vec<_>>(),
-        &t.split_whitespace().collect::<Vec<_>>(),
-    );
+    // A substring, not whole words: an old quote may end mid-word.
+    let norm = |t: &str| t.split_whitespace().collect::<Vec<_>>().join(" ");
+    let combined = norm(&cand.text);
+    let covers = |t: &str| combined.contains(&norm(t));
     let text = if absorbed.iter().all(|h| covers(&h.text)) {
         cand.text.clone()
     } else {
@@ -762,6 +762,14 @@ mod tests {
         fx.add(vec![item(1, 0.0, 0.0, 90.0, 10.0, "w1 w2 w3 w4 w5")], 1).unwrap();
         let out = fx.add(vec![item(1, 20.0, 0.0, 40.0, 10.0, "w3 w4")], 2).unwrap();
         assert_eq!(texts(&out), vec!["w1 w2 w3 w4 w5"]);
+    }
+
+    #[test]
+    fn the_screen_quote_wins_when_an_old_quote_ends_mid_word() {
+        let fx = Fx::new();
+        fx.add(vec![item(1, 0.0, 0.0, 50.0, 10.0, "Gal, Eich, Mike Shave")], 1).unwrap();
+        let out = fx.add(vec![item(1, 0.0, 0.0, 90.0, 10.0, "Gal, Eich, Mike Shaver, David")], 2).unwrap();
+        assert_eq!(texts(&out), vec!["Gal, Eich, Mike Shaver, David"]);
     }
 
     #[test]
