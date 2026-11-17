@@ -1,4 +1,5 @@
-/* Palette from spec 0001. Original uses the Paper tokens. */
+/* Palette from spec 0001. Original uses the Paper tokens.
+   --highlight is the one color besides covers (spec 0002). */
 :root,
 html[data-theme="original"],
 html[data-theme="paper"] {
@@ -7,6 +8,8 @@ html[data-theme="paper"] {
   --text: #2B2A28;
   --muted: #625E58;
   --line: #DDD8CD;
+  --highlight: rgb(255 213 79 / 0.35);
+  --highlight-blend: multiply;
   color-scheme: light;
 }
 
@@ -16,6 +19,8 @@ html[data-theme="night"] {
   --text: #D8D5CF;
   --muted: #9A968F;
   --line: #363636;
+  --highlight: rgb(217 160 65 / 0.3);
+  --highlight-blend: normal;
   color-scheme: dark;
 }
 

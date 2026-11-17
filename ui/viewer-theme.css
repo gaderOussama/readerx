@@ -105,3 +105,42 @@
 .toolbarField:focus {
   border-color: var(--rx-text);
 }
+
+/* Highlights (spec 0002). The layer sits between the canvas and the text layer. */
+.rx-hl-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.rx-hl {
+  position: absolute;
+  background: var(--rx-highlight);
+  mix-blend-mode: var(--rx-highlight-blend);
+}
+
+.rx-hl-btn,
+.rx-hl-menu {
+  position: fixed;
+  z-index: 10000;
+  font: 13px/1.4 system-ui, "Segoe UI", sans-serif;
+  color: var(--rx-text);
+  background: var(--rx-bg);
+  border: 1px solid var(--rx-muted);
+  border-radius: 6px;
+}
+.rx-hl-btn { padding: 4px 12px; cursor: pointer; }
+.rx-hl-menu { display: flex; flex-direction: column; min-width: 96px; padding: 4px; }
+.rx-hl-menu button {
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  background: none;
+  border: 0;
+  border-radius: 4px;
+  padding: 5px 10px;
+  cursor: pointer;
+}
+.rx-hl-btn:hover,
+.rx-hl-menu button:hover { background: var(--rx-surface); }
+.rx-hl-btn:focus-visible,
+.rx-hl-menu button:focus-visible { outline: 2px solid var(--rx-text); outline-offset: 1px; }
