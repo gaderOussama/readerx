@@ -243,7 +243,7 @@ h1, h2, h3, p { margin: 0; }
 }
 
 /* Reader */
-#reader-view { display: flex; flex-direction: column; height: 100%; }
+#reader-view { display: flex; flex-direction: column; height: 100%; position: relative; }
 .reader-bar {
   display: flex;
   align-items: center;
@@ -280,3 +280,28 @@ h1, h2, h3, p { margin: 0; }
 .theme-toggle button + button { border-left: 1px solid var(--muted); }
 .theme-toggle button:hover { background: var(--line); }
 .theme-toggle button[aria-pressed="true"] { background: var(--text); color: var(--bg); }
+
+/* Highlight bar: messages and Undo, over the bottom of the page */
+.hl-bar {
+  position: absolute;
+  left: 50%;
+  bottom: 20px;
+  z-index: 30;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  background: var(--bg);
+  border: 1px solid var(--muted);
+  border-radius: 6px;
+}
+.hl-undo {
+  font: inherit;
+  color: var(--text);
+  background: none;
+  border: 0;
+  padding: 0;
+  text-decoration: underline;
+  cursor: pointer;
+}
