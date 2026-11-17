@@ -7,11 +7,32 @@ pub mod watch;
 use chrono::Utc;
 use derive::{state_view, BookView, StateView};
 use library::{lock, Position, Store};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
-use tauri::{AppHandle, Manager, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 
 struct Shared(Mutex<Store>);
+
+/// The running folder watcher. Replacing it drops, and so stops, the old one.
+struct WatchSlot(Mutex<Option<watch::Watcher>>);
+
+/// Watch `folder`; every rescan it makes ends in a `library-changed` event.
+fn restart_watch(app: &AppHandle, folder: &str) {
+    let (scan_app, emit_app) = (app.clone(), app.clone());
+    let w = watch::start(
+        PathBuf::from(folder),
+        move || {
+            let s = scan_app.state::<Shared>();
+            let too_new = scan::run(&s.0, Utc::now(), &mut scan::fingerprint);
+            let readable = lock(&s.0).folder_readable;
+            (too_new, readable)
+        },
+        move || {
+            let _ = emit_app.emit("library-changed", ());
+        },
+    );
+    *app.state::<WatchSlot>().0.lock().unwrap_or_else(|e| e.into_inner()) = Some(w);
+}
 
 /// The asset scope is not remembered between runs, so every start and every
 /// folder change re-allows the folders. Never `forbid_directory`: it sticks
@@ -110,10 +131,15 @@ pub fn run() {
             std::fs::create_dir_all(dir.join("covers"))?;
             let store = Store::open(&dir, Utc::now());
             allow_dir(app.handle(), &store.covers_dir());
-            if let Some(folder) = &store.lib.settings.books_folder {
+            let folder = store.lib.settings.books_folder.clone();
+            if let Some(folder) = &folder {
                 allow_dir(app.handle(), Path::new(folder));
             }
             app.manage(Shared(Mutex::new(store)));
+            app.manage(WatchSlot(Mutex::new(None)));
+            if let Some(folder) = &folder {
+                restart_watch(app.handle(), folder);
+            }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
