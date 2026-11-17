@@ -1,4 +1,4 @@
-import { initHighlights, startHighlights, attachHighlights, highlightKey } from "./highlights.js";
+import { initHighlights, startHighlights, attachHighlights, highlightKey, flushNotes } from "./highlights.js";
 
 const { invoke, convertFileSrc } = window.__TAURI__.core;
 const { getCurrentWindow } = window.__TAURI__.window;
@@ -151,6 +151,7 @@ function enqueue(session, task) {
 
 function flush(session) {
   clearTimeout(session.timer);
+  flushNotes(session);
   return enqueue(session, () => send(session));
 }
 

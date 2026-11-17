@@ -1,6 +1,6 @@
 import { h } from "./lib/dom.js";
 import {
-  LIMITS, cleanText, normalizeRect, rectsIntersect, mergeLineRects, percentBox, sortHighlights,
+  LIMITS, cleanText, normalizeRect, rectsIntersect, pointInRect, mergeLineRects, percentBox, sortHighlights,
 } from "./lib/highlights.js";
 
 const { invoke } = window.__TAURI__.core;
@@ -9,6 +9,8 @@ const $ = (id) => document.getElementById(id);
 
 const TOO_LONG = "That highlight is too long.";
 const NOT_SAVED = "Could not save that highlight.";
+const NOTE_NOT_SAVED = "Could not save that note.";
+const NOTE_MS = 1000;
 const BAR_MS = 4000;
 const UNDO_MS = 6000;
 
@@ -52,7 +54,7 @@ $("hl-undo").addEventListener("click", () => {
 // ---- session state ----
 
 export function startHighlights(session) {
-  session.hl = { list: [], v: null, open: false };
+  session.hl = { list: [], v: null, open: false, dirty: new Map(), timers: new Map() };
   $("hl-toggle").textContent = "Highlights (0)";
   fetchHighlights(session);
 }
@@ -85,10 +87,15 @@ export function attachHighlights(session, win, app) {
   button.addEventListener("mousedown", (e) => e.preventDefault());
   button.addEventListener("click", () => addFromSelection(session));
   doc.body.append(button);
-  const v = { win, doc, app, button, down: false, timer: 0 };
+  const v = { win, doc, app, button, menu: null, down: false, timer: 0 };
   session.hl.v = v;
 
-  doc.addEventListener("mousedown", () => { v.down = true; hideButton(v); }, true);
+  doc.addEventListener("mousedown", (e) => {
+    v.down = true;
+    hideButton(v);
+    if (v.menu && !v.menu.contains(e.target)) closeMenu(v);
+  }, true);
+  doc.addEventListener("click", (e) => onPageClick(session, v, e));
   doc.addEventListener("mouseup", () => {
     v.down = false;
     showButton(v);
@@ -98,8 +105,12 @@ export function attachHighlights(session, win, app) {
     clearTimeout(v.timer);
     if (!v.down) v.timer = setTimeout(() => showButton(v), 200);
   });
-  app.pdfViewer.container.addEventListener("scroll", () => hideButton(v), { passive: true });
-  app.eventBus.on("scalechanging", () => hideButton(v));
+  const quiet = () => {
+    hideButton(v);
+    closeMenu(v);
+  };
+  app.pdfViewer.container.addEventListener("scroll", quiet, { passive: true });
+  app.eventBus.on("scalechanging", quiet);
   const place = (e) => live(session) && session.hl.v === v && drawPage(session, e.source);
   app.eventBus.on("pagerendered", place);
   app.eventBus.on("textlayerrendered", place);
@@ -345,15 +356,140 @@ function jump(session, hl) {
 }
 
 function item(session, hl) {
+  const note = h("textarea", {
+    class: "hl-note", rows: "2", maxlength: String(LIMITS.note), placeholder: "Add a note",
+    "aria-label": `Note for the highlight on page ${hl.page}`, "data-id": hl.id,
+  }, session.hl.dirty.get(hl.id) ?? hl.note);
+  note.addEventListener("input", () => noteEdited(session, hl.id, note.value));
+  note.addEventListener("blur", () => saveNote(session, hl.id));
   return h("li", { class: "hl-item", "data-id": hl.id },
     h("button", { class: "hl-quote", type: "button", title: "Go to this highlight", onclick: () => jump(session, hl) }, hl.text),
-    h("span", { class: "hl-page" }, `p. ${hl.page}`));
+    h("span", { class: "hl-page" }, `p. ${hl.page}`),
+    note,
+    h("button", { class: "btn hl-delete", type: "button", onclick: () => deleteHighlight(session, hl.id) }, "Delete"));
 }
 
 function renderPanel(session) {
   if (!session.hl.open) return;
+  const active = document.activeElement;
+  const keep = active?.classList.contains("hl-note")
+    ? { id: active.dataset.id, start: active.selectionStart, end: active.selectionEnd } : null;
   $("hl-empty").hidden = session.hl.list.length > 0;
   $("hl-list").replaceChildren(...session.hl.list.map((hl) => item(session, hl)));
+  const box = keep && $("hl-list").querySelector(`textarea[data-id="${keep.id}"]`);
+  if (box) {
+    box.focus();
+    box.setSelectionRange(keep.start, keep.end);
+  }
+}
+
+// ---- notes, delete, undo ----
+
+function noteEdited(session, id, text) {
+  const { dirty, timers } = session.hl;
+  dirty.set(id, text);
+  clearTimeout(timers.get(id));
+  timers.set(id, setTimeout(() => saveNote(session, id), NOTE_MS));
+}
+
+// The local list is the truth for notes, so the reply is not applied.
+function saveNote(session, id) {
+  const { dirty, timers, list } = session.hl;
+  clearTimeout(timers.get(id));
+  timers.delete(id);
+  if (!dirty.has(id) || !live(session)) return;
+  const note = dirty.get(id);
+  dirty.delete(id);
+  const hl = list.find((x) => x.id === id);
+  if (!hl) return;
+  hl.note = note;
+  call(session, "set_note", { highlightId: id, note }).catch((code) => {
+    console.error("set_note failed", code);
+    if (live(session)) {
+      showBar(NOTE_NOT_SAVED);
+      fetchHighlights(session);
+    }
+  });
+}
+
+export function flushNotes(session) {
+  for (const id of [...(session.hl?.dirty.keys() ?? [])]) saveNote(session, id);
+}
+
+function deleteHighlight(session, id) {
+  if (!live(session) || !session.hl.list.some((x) => x.id === id)) return;
+  flushNotes(session);
+  setList(session, session.hl.list.filter((x) => x.id !== id));
+  showBar("Highlight deleted ·", () => restore(session));
+  call(session, "delete_highlight", { highlightId: id })
+    .then((res) => live(session) && setList(session, res.highlights))
+    .catch((code) => {
+      console.error("delete_highlight failed", code);
+      if (live(session)) {
+        showBar("Could not delete that highlight.");
+        fetchHighlights(session);
+      }
+    });
+}
+
+function restore(session) {
+  if (!live(session)) return;
+  call(session, "restore_highlight")
+    .then((res) => live(session) && setList(session, res.highlights))
+    .catch((code) => {
+      console.error("restore_highlight failed", code);
+      if (live(session)) showBar("Could not bring that highlight back.");
+    });
+}
+
+function openNote(session, id) {
+  openPanel(session);
+  const box = $("hl-list").querySelector(`textarea[data-id="${id}"]`);
+  box?.scrollIntoView({ block: "nearest" });
+  box?.focus();
+}
+
+// ---- click menu, in the viewer document ----
+
+function closeMenu(v) {
+  v.menu?.remove();
+  v.menu = null;
+}
+
+function openMenu(session, v, hl, x, y) {
+  closeMenu(v);
+  const menu = v.doc.createElement("div");
+  menu.className = "rx-hl-menu";
+  menu.setAttribute("role", "menu");
+  for (const [label, act] of [["Note", () => openNote(session, hl.id)], ["Delete", () => deleteHighlight(session, hl.id)]]) {
+    const button = v.doc.createElement("button");
+    button.type = "button";
+    button.setAttribute("role", "menuitem");
+    button.textContent = label;
+    button.addEventListener("click", () => {
+      closeMenu(v);
+      act();
+    });
+    menu.append(button);
+  }
+  v.doc.body.append(menu);
+  menu.style.left = `${Math.max(8, Math.min(x, v.win.innerWidth - menu.offsetWidth - 8))}px`;
+  menu.style.top = `${Math.max(8, Math.min(y, v.win.innerHeight - menu.offsetHeight - 8))}px`;
+  v.menu = menu;
+}
+
+// A click on a highlighted spot, with no text selected. Links stay with PDF.js.
+function onPageClick(session, v, e) {
+  if (!live(session) || e.button !== 0 || !v.win.getSelection().isCollapsed) return;
+  if (e.target.closest?.(".rx-hl-btn, .rx-hl-menu, .annotationLayer :is(section, a)")) return;
+  const page = e.target.closest?.(".page[data-page-number]");
+  const layer = page?.querySelector(":scope > .textLayer");
+  const num = Number(page?.dataset.pageNumber);
+  const pageView = layer && v.app.pdfViewer.getPageView(num - 1);
+  if (!pageView) return;
+  const [px, py] = pageMap(pageView, layer).toPdf(e.clientX, e.clientY);
+  const hl = session.hl.list.find((x) => x.page === num && x.rects.some((r) => pointInRect(r, px, py)));
+  if (hl) openMenu(session, v, hl, e.clientX, e.clientY);
 }
 
 // ---- keys ----
@@ -363,8 +499,9 @@ function renderPanel(session) {
 export function highlightKey(e, session) {
   const v = session?.hl?.v;
   if (!v || !live(session)) return false;
-  if (e.key === "Escape" && !v.button.hidden) {
-    v.win.getSelection().removeAllRanges();
+  if (e.key === "Escape" && (v.menu || !v.button.hidden)) {
+    closeMenu(v);
+    if (!v.button.hidden) v.win.getSelection().removeAllRanges();
     hideButton(v);
     e.preventDefault();
     e.stopPropagation();
