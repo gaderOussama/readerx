@@ -92,7 +92,8 @@ pub fn start(
         let mut attached = attach(&folder, &tx);
         // false when the attach failed, so the next tick retries it
         let mut readable = attached.is_some() && fs::read_dir(&folder).is_ok();
-        let mut too_new = false;
+        // the scan that came with the start ignored too-new files: check once more
+        let mut too_new = true;
         loop {
             let wake = match rx.recv_timeout(next_wait(too_new)) {
                 Ok(Msg::Wake(w)) => w,
