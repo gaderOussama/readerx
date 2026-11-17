@@ -111,8 +111,14 @@ async function attach(session, win) {
   try {
     await app.open({ url: convertFileSrc(session.path) });
   } catch (err) {
-    // PDF.js shows its own error message; Back keeps working.
+    // This PDF.js build only logs load errors, so say it here. Back keeps working.
     console.error("viewer open failed", err);
+    if (cur === session && session.frame.contentWindow === win) {
+      const note = document.createElement("p");
+      note.className = "viewer-error";
+      note.textContent = "This PDF can't be opened. The file may be damaged.";
+      $("viewer-host").append(note);
+    }
   }
 }
 

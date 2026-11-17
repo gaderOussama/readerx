@@ -1,5 +1,6 @@
 import { relativeDay, progressText } from "./lib/format.js";
 import { openReader } from "./reader.js";
+import { failed, probeCovers } from "./covers.js";
 
 const { invoke, convertFileSrc } = window.__TAURI__.core;
 const { listen } = window.__TAURI__.event;
@@ -64,6 +65,7 @@ async function closeReader() {
   $("shelf-view").hidden = false;
   render();
   $("shelf-view").scrollTop = shelfScroll;
+  makeCovers();
 }
 
 function applyTheme(theme) {
@@ -73,6 +75,23 @@ function applyTheme(theme) {
 async function refreshState() {
   state = await invoke("get_state");
   applyTheme(state.settings.pageTheme);
+}
+
+// Redraws after a probe: same scroll spot, and an open card menu stays open.
+async function refreshShelf() {
+  await refreshState();
+  if (readerOpen) return;
+  const scroller = $("shelf-view");
+  const top = scroller.scrollTop;
+  const menuKey = openMenu?.button.dataset.key;
+  render();
+  scroller.scrollTop = top;
+  if (menuKey) $("shelf").querySelector(`[data-key="${CSS.escape(menuKey)}"]`)?.click();
+}
+
+// Covers are made in the background, one book at a time, never while a book is open.
+function makeCovers() {
+  probeCovers({ books: () => state.books, paused: () => readerOpen, onChange: refreshShelf });
 }
 
 function showError(message) {
@@ -103,6 +122,7 @@ async function pickFolder() {
     state = await invoke("choose_folder", { path });
     localNotice = null;
     render();
+    makeCovers();
   } catch (code) {
     showError(code === "not_a_folder" ? "That is not a folder." : `Could not use that folder (${code}).`);
   }
@@ -114,13 +134,23 @@ const SECTIONS = [
   ["finished", "Finished"],
 ];
 
+// Loaded covers are moved into the next render, so a re-render does not reload or flash them.
+const coverImgs = new Map();
+
 function cover(book) {
-  const tile = () => h("div", { class: "tile" }, h("span", {}, book.displayTitle));
-  if (!book.coverPath) return h("div", { class: "cover" }, tile());
-  const img = h("img", { src: convertFileSrc(book.coverPath), alt: "", loading: "lazy" });
-  const box = h("div", { class: "cover" }, img);
-  img.addEventListener("error", () => box.replaceChildren(tile()));
-  return box;
+  const tile = (note) => h("div", { class: "tile" }, h("span", {}, book.displayTitle),
+    note ? h("small", { class: "tile-note" }, note) : null);
+  if (!book.coverPath) return h("div", { class: "cover" }, tile(failed.has(book.id) ? "Can't preview" : null));
+  let img = coverImgs.get(book.coverPath);
+  if (!img) {
+    img = h("img", { src: convertFileSrc(book.coverPath), alt: "", loading: "lazy" });
+    img.addEventListener("error", () => {
+      coverImgs.delete(book.coverPath);
+      img.parentNode?.replaceChildren(tile());
+    });
+    coverImgs.set(book.coverPath, img);
+  }
+  return h("div", { class: "cover" }, img);
 }
 
 function bookMeta(book, now) {
@@ -250,6 +280,7 @@ async function start() {
   try {
     await refreshState();
     render();
+    makeCovers();
   } catch (code) {
     $("shelf").replaceChildren(emptyState("Could not load your library", String(code), "Choose folder"));
   }
@@ -258,7 +289,10 @@ async function start() {
   await listen("library-changed", async () => {
     try {
       await refreshState();
-      if (!readerOpen) render();
+      if (!readerOpen) {
+        render();
+        makeCovers();
+      }
     } catch (code) {
       console.error("get_state failed", code);
     }
