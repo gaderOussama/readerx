@@ -22,6 +22,8 @@ serde_json = "1"
 # chrono: ISO 8601 stamps and the corrupt-file name stamp, with the minimum features
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 sha2 = "0.10"
+# folder watching: debounced events, one rescan per settled batch
+notify-debouncer-mini = "0.7"
 
 [dev-dependencies]
 tempfile = "3"

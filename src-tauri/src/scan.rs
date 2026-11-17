@@ -185,7 +185,7 @@ pub fn merge(store: &mut Store, out: ScanOutput, now: DateTime<Utc>) {
 }
 
 /// Full scan: snapshot under the lock, walk and hash outside it, merge under it.
-/// Returns true when a file was too new and a rescan should follow in ~3 s.
+/// Returns true when a file was too new and a rescan should follow in ~1.6 s.
 pub fn run(shared: &Mutex<Store>, now: DateTime<Utc>, hasher: &mut Hasher) -> bool {
     let (folder, cache) = {
         let s = lock(shared);

@@ -160,7 +160,7 @@ Typeface: the Windows system font (`Segoe UI`, via `system-ui`); no font files s
 
 **Scan rules**:
 - Walk `booksFolder` recursively. Skip entries that can't be read (for example `System Volume Information` on a drive root), and do not follow symbolic links or junctions.
-- Skip a file whose modified time is less than 2 seconds old (it may still be copying), and schedule another scan 3 seconds later.
+- Skip a file whose modified time is less than 2 seconds old (it may still be copying), and schedule another scan 1.6 seconds later, so a new book shows about 2 seconds after its copy ends (AC-9).
 - Look up each file in the hash cache (`path`, `sizeBytes`, `mtimeMs`). Hash only on a miss. Hashing runs outside the library lock; the lock is taken only to merge the results.
 - If the folder disappears while the app is running, set `folderStatus = missing` and send `library-changed`. Keep watching the parent folder, or rescan every 10 seconds, so its return is noticed.
 
