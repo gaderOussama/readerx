@@ -1,7 +1,7 @@
 # 0001. ReaderX v1: a bookshelf that reopens every book where you left it
 
 **Date**: 2026-11-16
-**Status**: Proposed
+**Status**: Accepted (2026-11-17, all 17 acceptance criteria checked, see issue #5)
 
 ## Summary
 
