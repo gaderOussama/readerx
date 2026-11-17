@@ -19,6 +19,13 @@
     "allow-set-meta",
     "allow-save-cover",
     "allow-set-finished",
-    "allow-set-page-theme"
+    "allow-set-page-theme",
+    "allow-get-highlights",
+    "allow-add-highlights",
+    "allow-set-note",
+    "allow-delete-highlight",
+    "allow-restore-highlight",
+    "allow-forget-undo",
+    "allow-set-export-folder"
   ]
 }

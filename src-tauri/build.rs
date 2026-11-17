@@ -11,6 +11,13 @@ fn main() {
         "save_cover",
         "set_finished",
         "set_page_theme",
+        "get_highlights",
+        "add_highlights",
+        "set_note",
+        "delete_highlight",
+        "restore_highlight",
+        "forget_undo",
+        "set_export_folder",
     ]);
     tauri_build::try_build(tauri_build::Attributes::new().app_manifest(app))
         .expect("failed to run tauri-build");

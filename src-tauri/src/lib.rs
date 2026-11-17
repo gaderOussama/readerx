@@ -1,4 +1,5 @@
 pub mod derive;
+pub mod export;
 pub mod highlights;
 pub mod library;
 pub mod ops;
@@ -7,8 +8,11 @@ pub mod watch;
 
 use chrono::Utc;
 use derive::{state_view, BookView, StateView};
-use library::{lock, Position, Store};
+use highlights::{Books, Ctx, Highlight, Item};
+use library::{is_valid_id, lock, Position, Store};
+use serde::Serialize;
 use std::path::{Path, PathBuf};
+use std::sync::mpsc::Sender;
 use std::sync::Mutex;
 use tauri::{AppHandle, Emitter, Manager, State};
 
@@ -16,6 +20,15 @@ struct Shared(Mutex<Store>);
 
 /// The running folder watcher. Replacing it drops, and so stops, the old one.
 struct WatchSlot(Mutex<Option<watch::Watcher>>);
+
+/// Book ids for the export worker, which writes the vault files in the background.
+struct Exporter(Sender<String>);
+
+impl Exporter {
+    fn queue(&self, id: &str) {
+        let _ = self.0.send(id.to_string());
+    }
+}
 
 /// Watch `folder`; every rescan it makes ends in a `library-changed` event.
 fn restart_watch(app: &AppHandle, folder: &str) {
@@ -107,6 +120,138 @@ fn set_page_theme(state: State<Shared>, theme: String) -> Result<(), String> {
     ops::set_page_theme(&mut lock(&state.0), &theme)
 }
 
+/// The book's data folder and page count, or `unknown_book` (also for an id
+/// that is not the exact hash shape, so it never reaches a path).
+fn book_dir(state: &State<Shared>, id: &str) -> Result<(PathBuf, Option<u32>), String> {
+    let s = lock(&state.0);
+    match s.lib.books.get(id) {
+        Some(b) if is_valid_id(id) => Ok((s.dir.clone(), b.page_count)),
+        _ => Err("unknown_book".to_string()),
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct HighlightsOut {
+    highlights: Vec<Highlight>,
+    export_folder: Option<String>,
+    export_error: Option<String>,
+    notice: Option<bool>,
+}
+
+#[derive(Serialize)]
+struct HighlightList {
+    highlights: Vec<Highlight>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ExportFolder {
+    export_folder: String,
+}
+
+#[tauri::command(async)]
+fn get_highlights(
+    state: State<Shared>,
+    books: State<Books>,
+    exporter: State<Exporter>,
+    id: String,
+) -> Result<HighlightsOut, String> {
+    let (dir, pages) = book_dir(&state, &id)?;
+    let (export_folder, export_error) = {
+        let s = lock(&state.0);
+        (s.lib.settings.export_folder.clone(), s.lib.settings.export_errors.get(&id).cloned())
+    };
+    let listing = highlights::get(&Ctx::new(&dir, &id, pages)?, &books, Utc::now());
+    if export_error.is_some() {
+        exporter.queue(&id);
+    }
+    Ok(HighlightsOut {
+        highlights: listing.highlights,
+        export_folder,
+        export_error,
+        notice: listing.notice,
+    })
+}
+
+#[tauri::command(async)]
+fn add_highlights(
+    state: State<Shared>,
+    books: State<Books>,
+    exporter: State<Exporter>,
+    id: String,
+    items: Vec<Item>,
+) -> Result<HighlightList, String> {
+    let (dir, pages) = book_dir(&state, &id)?;
+    let highlights = highlights::add(&Ctx::new(&dir, &id, pages)?, &books, items, Utc::now())?;
+    exporter.queue(&id);
+    Ok(HighlightList { highlights })
+}
+
+#[tauri::command(async)]
+fn set_note(
+    state: State<Shared>,
+    books: State<Books>,
+    exporter: State<Exporter>,
+    id: String,
+    highlight_id: String,
+    note: String,
+) -> Result<HighlightList, String> {
+    let (dir, pages) = book_dir(&state, &id)?;
+    let ctx = Ctx::new(&dir, &id, pages)?;
+    let highlights = highlights::set_note(&ctx, &books, &highlight_id, &note, Utc::now())?;
+    exporter.queue(&id);
+    Ok(HighlightList { highlights })
+}
+
+#[tauri::command(async)]
+fn delete_highlight(
+    state: State<Shared>,
+    books: State<Books>,
+    exporter: State<Exporter>,
+    id: String,
+    highlight_id: String,
+) -> Result<HighlightList, String> {
+    let (dir, pages) = book_dir(&state, &id)?;
+    let ctx = Ctx::new(&dir, &id, pages)?;
+    let highlights = highlights::delete(&ctx, &books, &highlight_id, Utc::now())?;
+    exporter.queue(&id);
+    Ok(HighlightList { highlights })
+}
+
+#[tauri::command(async)]
+fn restore_highlight(
+    state: State<Shared>,
+    books: State<Books>,
+    exporter: State<Exporter>,
+    id: String,
+) -> Result<HighlightList, String> {
+    let (dir, pages) = book_dir(&state, &id)?;
+    let highlights = highlights::restore(&Ctx::new(&dir, &id, pages)?, &books, Utc::now())?;
+    exporter.queue(&id);
+    Ok(HighlightList { highlights })
+}
+
+#[tauri::command(async)]
+fn forget_undo(books: State<Books>, id: String) -> Result<(), String> {
+    books.forget_undo(&id);
+    Ok(())
+}
+
+#[tauri::command(async)]
+fn set_export_folder(
+    state: State<Shared>,
+    books: State<Books>,
+    exporter: State<Exporter>,
+    path: String,
+) -> Result<ExportFolder, String> {
+    let ids = export::set_folder(&state.0, &books, &path, Utc::now())?;
+    for id in &ids {
+        exporter.queue(id);
+    }
+    Ok(ExportFolder { export_folder: path })
+}
+
 pub fn run() {
     tauri::Builder::default()
         // single-instance must be registered first
@@ -138,6 +283,17 @@ pub fn run() {
                 allow_dir(app.handle(), Path::new(folder));
             }
             app.manage(Shared(Mutex::new(store)));
+            app.manage(Books::default());
+            let job_app = app.handle().clone();
+            app.manage(Exporter(export::spawn(move |id| {
+                let (shared, books) = (job_app.state::<Shared>(), job_app.state::<Books>());
+                if let Some(export_error) = export::export_book(&shared.0, &books, id, Utc::now()) {
+                    let _ = job_app.emit(
+                        "highlights-exported",
+                        serde_json::json!({ "id": id, "exportError": export_error }),
+                    );
+                }
+            })));
             app.manage(WatchSlot(Mutex::new(None)));
             if let Some(folder) = &folder {
                 restart_watch(app.handle(), folder);
@@ -154,6 +310,13 @@ pub fn run() {
             save_cover,
             set_finished,
             set_page_theme,
+            get_highlights,
+            add_highlights,
+            set_note,
+            delete_highlight,
+            restore_highlight,
+            forget_undo,
+            set_export_folder,
         ])
         .run(tauri::generate_context!())
         .expect("error while running ReaderX");
