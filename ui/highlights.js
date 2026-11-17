@@ -216,12 +216,42 @@ function pagesOf(v, range) {
   return out;
 }
 
+// When the new boxes overlap existing highlights, Rust merges them into one, so
+// the quote must be the whole passage: the selection stretched over the old
+// boxes. If a box can't be reached (scrolled away) the plain text is sent and
+// Rust joins the quotes itself.
+function quoteFor(session, v, item) {
+  const hits = session.hl.list.filter((h) => h.page === item.page
+    && h.rects.some((r) => item.rects.some((n) => rectsIntersect(r, n))));
+  if (hits.length === 0) return item.text;
+  const { vp, b, sx, sy } = item.map;
+  const wide = item.clipped.cloneRange();
+  for (const h of hits) {
+    for (const rect of h.rects) {
+      const [x1, y1, x2, y2] = normalizeRect(vp.convertToViewportRectangle(rect));
+      const left = b.left + x1 / sx, right = b.left + x2 / sx;
+      const top = b.top + y1 / sy, bottom = b.top + y2 / sy;
+      const midX = (left + right) / 2, midY = (top + bottom) / 2;
+      for (const [x, y] of [[left + 1, midY], [right - 1, midY], [midX, top + 1], [midX, bottom - 1]]) {
+        const at = v.doc.caretRangeFromPoint(x, y);
+        if (!at) return item.text;
+        const [node, offset] = [at.startContainer, at.startOffset];
+        if (wide.comparePoint(node, offset) < 0) wide.setStart(node, offset);
+        else if (wide.comparePoint(node, offset) > 0) wide.setEnd(node, offset);
+      }
+    }
+  }
+  const { text } = collect(v.doc, clipTo(v.doc, wide, item.layer), item.layer);
+  return text || item.text;
+}
+
 async function addFromSelection(session) {
   const v = session.hl.v;
   if (!v || !live(session)) return;
   const range = readSelection(v);
   if (!range) return;
   const items = pagesOf(v, range);
+  for (const item of items) item.text = quoteFor(session, v, item);
   v.win.getSelection().removeAllRanges();
   hideButton(v);
   if (items.length === 0) return;
