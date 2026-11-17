@@ -1,3 +1,4 @@
+import { h } from "./lib/dom.js";
 import {
   LIMITS, cleanText, normalizeRect, rectsIntersect, mergeLineRects, percentBox, sortHighlights,
 } from "./lib/highlights.js";
@@ -51,13 +52,16 @@ $("hl-undo").addEventListener("click", () => {
 // ---- session state ----
 
 export function startHighlights(session) {
-  session.hl = { list: [], v: null };
+  session.hl = { list: [], v: null, open: false };
+  $("hl-toggle").textContent = "Highlights (0)";
   fetchHighlights(session);
 }
 
 function setList(session, list) {
   session.hl.list = sortHighlights(list);
+  $("hl-toggle").textContent = `Highlights (${session.hl.list.length})`;
   redraw(session);
+  renderPanel(session);
 }
 
 async function fetchHighlights(session) {
@@ -307,6 +311,49 @@ function redraw(session) {
     const pageView = v.app.pdfViewer.getPageView(n - 1);
     if (pageView) drawPage(session, pageView);
   }
+}
+
+// ---- side panel, in the parent page ----
+
+function openPanel(session) {
+  session.hl.open = true;
+  $("hl-panel").hidden = false;
+  $("hl-toggle").setAttribute("aria-expanded", "true");
+  renderPanel(session);
+}
+
+function closePanel(session) {
+  session.hl.open = false;
+  $("hl-panel").hidden = true;
+  $("hl-toggle").setAttribute("aria-expanded", "false");
+}
+
+$("hl-toggle").addEventListener("click", () => {
+  const session = ctx.current();
+  if (!session || session.exiting) return;
+  if (session.hl.open) closePanel(session);
+  else openPanel(session);
+});
+
+function jump(session, hl) {
+  const [x1, , , y2] = hl.rects[0];
+  // 36 PDF units of room above the box, so it sits a little below the top.
+  session.app?.pdfViewer.scrollPageIntoView({
+    pageNumber: hl.page,
+    destArray: [null, { name: "XYZ" }, x1, y2 + 36, null],
+  });
+}
+
+function item(session, hl) {
+  return h("li", { class: "hl-item", "data-id": hl.id },
+    h("button", { class: "hl-quote", type: "button", title: "Go to this highlight", onclick: () => jump(session, hl) }, hl.text),
+    h("span", { class: "hl-page" }, `p. ${hl.page}`));
+}
+
+function renderPanel(session) {
+  if (!session.hl.open) return;
+  $("hl-empty").hidden = session.hl.list.length > 0;
+  $("hl-list").replaceChildren(...session.hl.list.map((hl) => item(session, hl)));
 }
 
 // ---- keys ----

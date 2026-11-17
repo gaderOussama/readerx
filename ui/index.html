@@ -24,6 +24,7 @@
     <header class="reader-bar">
       <button id="reader-back" class="btn" type="button">&larr; Back</button>
       <div id="reader-title" class="reader-title"></div>
+      <button id="hl-toggle" class="btn" type="button" aria-expanded="false" aria-controls="hl-panel">Highlights (0)</button>
       <div class="theme-toggle" role="group" aria-label="Page theme">
         <button type="button" data-theme-choice="original" aria-pressed="false">Original</button>
         <button type="button" data-theme-choice="paper" aria-pressed="false">Paper</button>
@@ -31,7 +32,15 @@
       </div>
     </header>
     <div id="viewer-host"></div>
-    <div id="hl-bar" class="hl-bar" role="status" hidden>
+    <aside id="hl-panel" class="hl-panel" aria-label="Highlights" hidden>
+      <p id="hl-damaged" class="hl-damaged" hidden>Highlights for this book were damaged and set aside.</p>
+      <div class="hl-scroll">
+        <p id="hl-empty" class="hl-empty">Select text to highlight it.</p>
+        <ul id="hl-list" class="hl-list"></ul>
+      </div>
+      <div id="hl-export" class="hl-export"></div>
+    </aside>
+    <div id="hl-bar"class="hl-bar" role="status" hidden>
       <span id="hl-bar-text"></span>
       <button id="hl-undo" class="hl-undo" type="button" hidden>Undo</button>
     </div>
