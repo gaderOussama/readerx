@@ -2,6 +2,7 @@ pub mod derive;
 pub mod library;
 pub mod ops;
 pub mod scan;
+pub mod watch;
 
 use chrono::Utc;
 use derive::{state_view, BookView, StateView};
