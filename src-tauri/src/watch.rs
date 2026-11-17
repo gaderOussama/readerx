@@ -2,7 +2,15 @@
 //! change (or a timeout), runs a full rescan, and tells the screen.
 //! The decisions are plain functions so they test without the OS.
 
+use notify_debouncer_mini::notify::{RecommendedWatcher, RecursiveMode};
+use notify_debouncer_mini::{new_debouncer, DebounceEventResult, Debouncer};
+use std::path::{Path, PathBuf};
+use std::sync::mpsc::{self, RecvTimeoutError, Sender};
 use std::time::Duration;
+use std::{fs, thread};
+
+/// Events are batched until the folder has been quiet this long.
+const DEBOUNCE: Duration = Duration::from_millis(500);
 
 /// A file that was too new to read gets one more scan after this.
 pub const RETRY: Duration = Duration::from_secs(3);
@@ -43,6 +51,70 @@ pub fn rescan_due(wake: Wake, too_new: bool, was_readable: bool, readable_now: b
 /// needed when none is attached, and after an error (the old one may be dead).
 pub fn needs_attach(readable: bool, attached: bool, wake: Wake) -> bool {
     readable && (!attached || wake == Wake::Error)
+}
+
+enum Msg {
+    Wake(Wake),
+    Stop,
+}
+
+/// Handle to the watcher thread. Dropping it stops the thread.
+pub struct Watcher(Sender<Msg>);
+
+impl Drop for Watcher {
+    fn drop(&mut self) {
+        // the debouncer's callback holds a Sender too, so closing ours is not enough
+        let _ = self.0.send(Msg::Stop);
+    }
+}
+
+fn attach(folder: &Path, tx: &Sender<Msg>) -> Option<Debouncer<RecommendedWatcher>> {
+    let tx = tx.clone();
+    let mut d = new_debouncer(DEBOUNCE, move |res: DebounceEventResult| {
+        let _ = tx.send(Msg::Wake(if res.is_ok() { Wake::Event } else { Wake::Error }));
+    })
+    .ok()?;
+    d.watcher().watch(folder, RecursiveMode::Recursive).ok()?;
+    Some(d)
+}
+
+/// Watch `folder` on its own thread. `scan` runs a full rescan and returns
+/// `(too_new, readable)`; `changed` tells the screen to refresh. Nothing here
+/// touches the library: a vanished folder only changes what `scan` reports.
+pub fn start(
+    folder: PathBuf,
+    mut scan: impl FnMut() -> (bool, bool) + Send + 'static,
+    changed: impl Fn() + Send + 'static,
+) -> Watcher {
+    let (tx, rx) = mpsc::channel();
+    let handle = Watcher(tx.clone());
+    thread::spawn(move || {
+        let mut attached = attach(&folder, &tx);
+        // false when the attach failed, so the next tick retries it
+        let mut readable = attached.is_some() && fs::read_dir(&folder).is_ok();
+        let mut too_new = false;
+        loop {
+            let wake = match rx.recv_timeout(next_wait(too_new)) {
+                Ok(Msg::Wake(w)) => w,
+                Ok(Msg::Stop) | Err(RecvTimeoutError::Disconnected) => return,
+                Err(RecvTimeoutError::Timeout) => Wake::Tick,
+            };
+            let now_readable = fs::read_dir(&folder).is_ok();
+            if !rescan_due(wake, too_new, readable, now_readable) {
+                continue;
+            }
+            let (new_too_new, scan_readable) = scan();
+            too_new = new_too_new;
+            if !scan_readable {
+                attached = None;
+            } else if needs_attach(scan_readable, attached.is_some(), wake) {
+                attached = attach(&folder, &tx);
+            }
+            readable = scan_readable && attached.is_some();
+            changed();
+        }
+    });
+    handle
 }
 
 #[cfg(test)]
