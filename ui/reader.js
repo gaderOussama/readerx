@@ -1,3 +1,5 @@
+import { initHighlights, startHighlights, attachHighlights, highlightKey, flushNotes, endHighlights, closePanelIfOpen } from "./highlights.js";
+
 const { invoke, convertFileSrc } = window.__TAURI__.core;
 const { getCurrentWindow } = window.__TAURI__.window;
 const { openUrl } = window.__TAURI__.opener;
@@ -5,7 +7,7 @@ const { openUrl } = window.__TAURI__.opener;
 const $ = (id) => document.getElementById(id);
 
 const SAVE_DELAY_MS = 1000;
-const PALETTE = ["bg", "surface", "text", "muted", "line"];
+const PALETTE = ["bg", "surface", "text", "muted", "line", "highlight", "highlight-blend"];
 const VIEWER = "vendor/pdfjs/web/viewer.html";
 
 // The one open book, or null. Every async step re-checks that it is still the
@@ -26,6 +28,7 @@ function loadViewer(session) {
   clearTimeout(session.timer);
   const start = session.pending ?? session.position;
   session.app = null;
+  if (session.hl) session.hl.v = null;
   session.pending = null;
   const frame = document.createElement("iframe");
   frame.title = "PDF viewer";
@@ -107,6 +110,7 @@ async function attach(session, win) {
   await app.initializedPromise;
   if (cur !== session || session.frame.contentWindow !== win) return;
   session.app = app;
+  attachHighlights(session, win, app);
   app.eventBus.on("updateviewarea", (e) => onViewArea(session, app, e.location));
   try {
     await app.open({ url: convertFileSrc(session.path) });
@@ -138,11 +142,18 @@ function onViewArea(session, app, location) {
   session.timer = setTimeout(() => flush(session), SAVE_DELAY_MS);
 }
 
-// Saves run one after another so an older position never lands after a newer one.
+// Saves and highlight calls run one after another, so an older one never lands
+// after a newer one. A failed task does not stop the queue.
+function enqueue(session, task) {
+  const run = session.queue.then(task);
+  session.queue = run.catch(() => {});
+  return run;
+}
+
 function flush(session) {
   clearTimeout(session.timer);
-  session.queue = session.queue.then(() => send(session));
-  return session.queue;
+  flushNotes(session);
+  return enqueue(session, () => send(session));
 }
 
 async function send(session) {
@@ -170,8 +181,10 @@ function onViewerKey(e) {
     e.stopPropagation();
     return;
   }
+  if (highlightKey(e, cur)) return;
   if (e.key !== "Escape" || viewerIsBusy(e.currentTarget)) return;
   e.preventDefault();
+  if (closePanelIfOpen(cur)) return;
   back();
 }
 
@@ -180,6 +193,7 @@ async function back() {
   if (!session || session.exiting) return;
   session.exiting = true;
   await flush(session);
+  endHighlights(session);
   cur = null;
   $("viewer-host").replaceChildren();
   $("reader-view").hidden = true;
@@ -214,11 +228,14 @@ async function switchTheme(theme) {
 
 export function openReader({ book, path, position, theme, onExit, onTheme }) {
   cur = { id: book.id, path, position, theme, onExit, onTheme, queue: Promise.resolve(), exiting: false };
+  startHighlights(cur);
   $("reader-title").textContent = book.displayTitle;
   markTheme(theme);
   $("reader-view").hidden = false;
   loadViewer(cur);
 }
+
+initHighlights({ current: () => cur, enqueue });
 
 $("reader-back").addEventListener("click", back);
 for (const button of document.querySelectorAll("[data-theme-choice]")) {
