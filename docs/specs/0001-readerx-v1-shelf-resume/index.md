@@ -30,7 +30,7 @@ Reasoning and options: see [rationale.md](rationale.md).
 - **AC-11**: A PDF that can't be read (corrupt, or locked with a password) still appears on the shelf with a `Can't preview` tile, and it never blocks or crashes the shelf or other books. Opening a password PDF shows the PDF.js password prompt; opening a corrupt one shows the PDF.js error message, with the Back button working.
 - **AC-12**: A crash or power cut never leaves `library.json` half written or empty. If it is unreadable at startup, it is renamed to `library.corrupt-YYYYMMDD-HHMMSS.json` (UTC time), the app starts with an empty library (folder not chosen), and a banner you can dismiss says what happened.
 - **AC-13**: Only one ReaderX window exists. Launching it again brings the open window to the front, even when it was minimized. Window size and position are remembered, and the window never flashes white on open.
-- **AC-14**: A Windows installer installs ReaderX with a Start menu shortcut and an optional desktop shortcut. With 200 unchanged books whose covers are already made, the shelf is visible in under 2 seconds after launch.
+- **AC-14**: A Windows installer installs ReaderX with a Start menu shortcut and an optional desktop shortcut. With 200 unchanged books whose covers are already made, the shelf shows at most 0.5 seconds later than a launch with no books folder (the WebView2 start itself, about 3 seconds on the build PC, is outside the app's control).
 - **AC-15**: If the books folder is missing (deleted, renamed, or a drive unplugged), at launch or while the app is open, the app shows `Books folder not found` with a Choose folder button. No progress is deleted.
 - **AC-16**: The shelf header has a Change folder button. A chosen folder that holds no PDFs shows `No PDFs found in <folder>` instead of a blank shelf.
 - **AC-17**: Inside the reader you can only read the current book: the viewer's Open file, Print, Download and Bookmark buttons are hidden, dropping a file on it does nothing, and web links in a PDF open in your normal browser.
@@ -193,7 +193,7 @@ Typeface: the Windows system font (`Segoe UI`, via `system-ui`); no font files s
 - Bad files: a zero byte `.pdf`, a corrupt PDF and a password PDF in the folder show `Can't preview` tiles, with no password prompt during the probe, while every other book loads normally. Verifies **AC-11**.
 - Folder states: unplug the drive while the app is open, see `Books folder not found`; plug it back, see the shelf return. An empty folder shows `No PDFs found`. Verifies **AC-15**, **AC-16**.
 - Reader lockdown: dropping a PDF onto the viewer does nothing, and a web link in a PDF opens the normal browser. Verifies **AC-17**.
-- Startup: 200 unchanged books on a cold start reach the shelf in under 2 seconds, with no file contents read (hash cache hit). Verifies **AC-14**.
+- Startup: 200 unchanged books on a cold start reach the shelf at most 0.5 seconds later than a launch with no books folder, with no file contents read (hash cache hit). Verifies **AC-14**.
 - Path safety: `save_cover` with id `../../evil` is rejected and no file is written outside `covers\`. Verifies the id invariant (supports **AC-6**).
 - Unit tests (`cargo test`): fingerprint stability, hash cache hit and miss, scan merge (new, removed, renamed, duplicate, still copying), display title rule, section derivation and ordering, the finished rule (including a null previous position and `atEnd`), position validation, atomic save, rename retry and corrupt file handling, all with temporary folders and fixed timestamps.
 

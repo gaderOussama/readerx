@@ -29,6 +29,13 @@
   "bundle": {
     "active": true,
     "icon": ["icons/icon.ico", "icons/icon.png"],
-    "targets": ["nsis"]
+    "targets": ["nsis"],
+    "publisher": "ReaderX",
+    "shortDescription": "A bookshelf that reopens every book where you left it",
+    "windows": {
+      "nsis": {
+        "installMode": "currentUser"
+      }
+    }
   }
 }
