@@ -404,7 +404,7 @@ function renderExport(session) {
     h("div", { class: "hl-export-row" },
       h("span", { class: "hl-export-path", title: folder ?? "" }, text),
       h("button", { class: "btn", type: "button", onclick: () => pickExportFolder(session) }, label)),
-    error ? h("p", { class: "hl-export-error" }, `Export failed: ${errorWords(error)}`) : null);
+    ...(error ? [h("p", { class: "hl-export-error" }, `Export failed: ${errorWords(error)}`)] : []));
 }
 
 async function pickExportFolder(session) {
