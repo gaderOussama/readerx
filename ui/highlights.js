@@ -249,7 +249,7 @@ function quoteFor(session, v, item) {
   const wide = item.clipped.cloneRange();
   for (const h of hits) {
     for (const rect of h.rects) {
-      const [x1, y1, x2, y2] = normalizeRect(vp.convertToViewportRectangle(rect));
+      const [x1, y1, x2, y2] = normalizeRect([...vp.convertToViewportPoint(rect[0], rect[1]), ...vp.convertToViewportPoint(rect[2], rect[3])]);
       const left = b.left + x1 / sx, right = b.left + x2 / sx;
       const top = b.top + y1 / sy, bottom = b.top + y2 / sy;
       const midX = (left + right) / 2, midY = (top + bottom) / 2;
@@ -308,7 +308,7 @@ function drawPage(session, pageView) {
   else wrapper.after(layer);
   const vp = pageView.viewport;
   layer.replaceChildren(...items.flatMap((h) => h.rects.map((r) => {
-    const box = percentBox(vp.convertToViewportRectangle(r), vp.width, vp.height);
+    const box = percentBox([...vp.convertToViewportPoint(r[0], r[1]), ...vp.convertToViewportPoint(r[2], r[3])], vp.width, vp.height);
     const el = v.doc.createElement("div");
     el.className = "rx-hl";
     el.style.left = `${box.left}%`;
