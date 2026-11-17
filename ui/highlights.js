@@ -1,9 +1,11 @@
 import { h } from "./lib/dom.js";
 import {
   LIMITS, cleanText, normalizeRect, rectsIntersect, pointInRect, mergeLineRects, percentBox, sortHighlights,
+  middleTruncate, errorWords,
 } from "./lib/highlights.js";
 
 const { invoke } = window.__TAURI__.core;
+const { open: openDialog } = window.__TAURI__.dialog;
 
 const $ = (id) => document.getElementById(id);
 
@@ -11,6 +13,7 @@ const TOO_LONG = "That highlight is too long.";
 const NOT_SAVED = "Could not save that highlight.";
 const NOTE_NOT_SAVED = "Could not save that note.";
 const NOTE_MS = 1000;
+const PATH_MAX = 28;
 const BAR_MS = 4000;
 const UNDO_MS = 6000;
 
@@ -69,7 +72,9 @@ function setList(session, list) {
 async function fetchHighlights(session) {
   try {
     const res = await call(session, "get_highlights");
-    if (live(session)) setList(session, res.highlights);
+    if (!live(session)) return;
+    Object.assign(session.hl, { exportFolder: res.exportFolder, exportError: res.exportError, notice: res.notice });
+    setList(session, res.highlights);
   } catch (err) {
     console.error("get_highlights failed", err);
   }
@@ -334,7 +339,9 @@ function openPanel(session) {
 }
 
 function closePanel(session) {
+  flushNotes(session);
   session.hl.open = false;
+  session.hl.notice = null;
   $("hl-panel").hidden = true;
   $("hl-toggle").setAttribute("aria-expanded", "false");
 }
@@ -371,6 +378,8 @@ function item(session, hl) {
 
 function renderPanel(session) {
   if (!session.hl.open) return;
+  $("hl-damaged").hidden = !session.hl.notice;
+  renderExport(session);
   const active = document.activeElement;
   const keep = active?.classList.contains("hl-note")
     ? { id: active.dataset.id, start: active.selectionStart, end: active.selectionEnd } : null;
@@ -382,6 +391,42 @@ function renderPanel(session) {
     box.setSelectionRange(keep.start, keep.end);
   }
 }
+
+// ---- export folder row ----
+
+function renderExport(session) {
+  const { exportFolder: folder, exportError: error } = session.hl;
+  const [text, label] = folder
+    ? [`Export to: ${middleTruncate(folder, PATH_MAX)}`, "Change"]
+    : ["Export to Obsidian or Markdown", "Choose folder"];
+  $("hl-export").replaceChildren(
+    h("div", { class: "hl-export-row" },
+      h("span", { class: "hl-export-path", title: folder ?? "" }, text),
+      h("button", { class: "btn", type: "button", onclick: () => pickExportFolder(session) }, label)),
+    error ? h("p", { class: "hl-export-error" }, `Export failed: ${errorWords(error)}`) : null);
+}
+
+async function pickExportFolder(session) {
+  try {
+    const path = await openDialog({ directory: true });
+    if (!path || !live(session)) return;
+    const res = await invoke("set_export_folder", { path });
+    if (!live(session)) return;
+    Object.assign(session.hl, { exportFolder: res.exportFolder, exportError: null });
+    renderExport(session);
+  } catch (code) {
+    console.error("set_export_folder failed", code);
+    if (live(session)) showBar(code === "not_a_folder" ? "That is not a folder." : "Could not use that folder.");
+  }
+}
+
+// A book's export finished in the background; the line shows only for the open book.
+window.__TAURI__.event.listen("highlights-exported", (e) => {
+  const session = ctx?.current();
+  if (!session?.hl || e.payload.id !== session.id) return;
+  session.hl.exportError = e.payload.exportError ?? null;
+  if (session.hl.open) renderExport(session);
+}).catch((err) => console.error("export events not heard", err));
 
 // ---- notes, delete, undo ----
 
