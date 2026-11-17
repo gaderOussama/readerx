@@ -55,6 +55,7 @@ fn get_state(state: State<Shared>) -> Result<StateView, String> {
 fn choose_folder(app: AppHandle, state: State<Shared>, path: String) -> Result<StateView, String> {
     ops::set_folder(&mut lock(&state.0), &path)?;
     allow_dir(&app, Path::new(&path));
+    restart_watch(&app, &path);
     scan::run(&state.0, Utc::now(), &mut scan::fingerprint);
     Ok(state_view(&lock(&state.0)))
 }
