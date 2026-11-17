@@ -442,7 +442,8 @@ function saveNote(session, id) {
   const { dirty, timers, list } = session.hl;
   clearTimeout(timers.get(id));
   timers.delete(id);
-  if (!dirty.has(id) || !live(session)) return;
+  // Not `live`: leaving the book flushes notes while the session is exiting.
+  if (!dirty.has(id) || ctx.current() !== session) return;
   const note = dirty.get(id);
   dirty.delete(id);
   const hl = list.find((x) => x.id === id);
@@ -536,6 +537,30 @@ function onPageClick(session, v, e) {
   const hl = session.hl.list.find((x) => x.page === num && x.rects.some((r) => pointInRect(r, px, py)));
   if (hl) openMenu(session, v, hl, e.clientX, e.clientY);
 }
+
+// ---- leaving and Escape ----
+
+// Called after Back has flushed the queue.
+export function endHighlights(session) {
+  closePanel(session);
+  hideBar();
+  invoke("forget_undo", { id: session.id }).catch((err) => console.error("forget_undo failed", err));
+}
+
+export function closePanelIfOpen(session) {
+  if (!session?.hl?.open) return false;
+  closePanel(session);
+  return true;
+}
+
+// Escape with focus in the panel (a note field saves first, inside closePanel).
+document.addEventListener("keydown", (e) => {
+  const session = ctx?.current();
+  if (e.key !== "Escape" || !session?.hl?.open || session.exiting) return;
+  e.preventDefault();
+  closePanel(session);
+  session.frame.contentWindow.focus();
+});
 
 // ---- keys ----
 

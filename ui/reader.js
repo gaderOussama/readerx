@@ -1,4 +1,4 @@
-import { initHighlights, startHighlights, attachHighlights, highlightKey, flushNotes } from "./highlights.js";
+import { initHighlights, startHighlights, attachHighlights, highlightKey, flushNotes, endHighlights, closePanelIfOpen } from "./highlights.js";
 
 const { invoke, convertFileSrc } = window.__TAURI__.core;
 const { getCurrentWindow } = window.__TAURI__.window;
@@ -28,6 +28,7 @@ function loadViewer(session) {
   clearTimeout(session.timer);
   const start = session.pending ?? session.position;
   session.app = null;
+  if (session.hl) session.hl.v = null;
   session.pending = null;
   const frame = document.createElement("iframe");
   frame.title = "PDF viewer";
@@ -183,6 +184,7 @@ function onViewerKey(e) {
   if (highlightKey(e, cur)) return;
   if (e.key !== "Escape" || viewerIsBusy(e.currentTarget)) return;
   e.preventDefault();
+  if (closePanelIfOpen(cur)) return;
   back();
 }
 
@@ -191,6 +193,7 @@ async function back() {
   if (!session || session.exiting) return;
   session.exiting = true;
   await flush(session);
+  endHighlights(session);
   cur = null;
   $("viewer-host").replaceChildren();
   $("reader-view").hidden = true;
@@ -232,7 +235,7 @@ export function openReader({ book, path, position, theme, onExit, onTheme }) {
   loadViewer(cur);
 }
 
-initHighlights({ current: () => cur, enqueue, back });
+initHighlights({ current: () => cur, enqueue });
 
 $("reader-back").addEventListener("click", back);
 for (const button of document.querySelectorAll("[data-theme-choice]")) {
