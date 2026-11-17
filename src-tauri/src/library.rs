@@ -35,6 +35,12 @@ pub struct Settings {
     pub schema_version: u32,
     pub books_folder: Option<String>,
     pub page_theme: PageTheme,
+    /// Where the highlight Markdown files go. Null means no export.
+    #[serde(default)]
+    pub export_folder: Option<String>,
+    /// Book id -> code of its last failed export; removed on the next success.
+    #[serde(default)]
+    pub export_errors: BTreeMap<String, String>,
 }
 
 impl Default for Settings {
@@ -43,6 +49,8 @@ impl Default for Settings {
             schema_version: SCHEMA_VERSION,
             books_folder: None,
             page_theme: PageTheme::Paper,
+            export_folder: None,
+            export_errors: BTreeMap::new(),
         }
     }
 }
@@ -166,8 +174,15 @@ pub fn library_path(dir: &Path) -> PathBuf {
     dir.join("library.json")
 }
 
+/// `<name>.tmp` beside the target: `library.json.tmp`, `<bookId>.json.tmp`.
+pub fn tmp_path_of(target: &Path) -> PathBuf {
+    let mut name = target.file_name().unwrap_or_default().to_os_string();
+    name.push(".tmp");
+    target.with_file_name(name)
+}
+
 fn tmp_path(dir: &Path) -> PathBuf {
-    dir.join("library.json.tmp")
+    tmp_path_of(&library_path(dir))
 }
 
 /// Returns the library and, when a bad file was set aside, the notice text.
@@ -200,30 +215,41 @@ fn set_aside(dir: &Path, now: DateTime<Utc>) -> String {
 
 pub fn save(dir: &Path, lib: &Library) -> io::Result<()> {
     let bytes = serde_json::to_vec_pretty(lib).map_err(io::Error::other)?;
-    atomic_write(dir, &bytes, &mut |from, to| std::fs::rename(from, to), 5, Duration::from_millis(50))
+    save_file(&library_path(dir), &bytes)
 }
 
-/// Write `.tmp`, flush it to disk, rename over the real file. The rename can
-/// fail while antivirus or an indexer holds the file, so it is retried.
-fn atomic_write(
-    dir: &Path,
+/// Atomically replace `target` with `bytes` through `<target>.tmp`.
+pub fn save_file(target: &Path, bytes: &[u8]) -> io::Result<()> {
+    atomic_write(
+        target,
+        &tmp_path_of(target),
+        bytes,
+        &mut |from, to| std::fs::rename(from, to),
+        5,
+        Duration::from_millis(50),
+    )
+}
+
+/// Write `tmp`, flush it to disk, rename over `target`. The rename can fail
+/// while antivirus or an indexer holds the file, so it is retried.
+pub fn atomic_write(
+    target: &Path,
+    tmp: &Path,
     bytes: &[u8],
     rename: &mut dyn FnMut(&Path, &Path) -> io::Result<()>,
     attempts: u32,
     delay: Duration,
 ) -> io::Result<()> {
-    let tmp = tmp_path(dir);
-    let mut f = std::fs::File::create(&tmp)?;
+    let mut f = std::fs::File::create(tmp)?;
     f.write_all(bytes)?;
     f.sync_all()?;
     drop(f);
-    let target = library_path(dir);
     let mut last = None;
     for i in 0..attempts {
         if i > 0 {
             std::thread::sleep(delay);
         }
-        match rename(&tmp, &target) {
+        match rename(tmp, target) {
             Ok(()) => return Ok(()),
             Err(e) => last = Some(e),
         }
@@ -336,7 +362,8 @@ mod tests {
         let d = tempfile::tempdir().unwrap();
         let mut calls = 0;
         let r = atomic_write(
-            d.path(),
+            &library_path(d.path()),
+            &tmp_path(d.path()),
             b"{}",
             &mut |from, to| {
                 calls += 1;
@@ -360,7 +387,8 @@ mod tests {
         std::fs::write(library_path(d.path()), b"old").unwrap();
         let mut calls = 0;
         let r = atomic_write(
-            d.path(),
+            &library_path(d.path()),
+            &tmp_path(d.path()),
             b"new",
             &mut |_, _| {
                 calls += 1;
@@ -372,5 +400,44 @@ mod tests {
         assert!(r.is_err());
         assert_eq!(calls, 5);
         assert_eq!(std::fs::read(library_path(d.path())).unwrap(), b"old");
+    }
+
+    #[test]
+    fn save_file_writes_any_target_through_its_own_tmp() {
+        let d = tempfile::tempdir().unwrap();
+        let target = d.path().join("abc.json");
+        std::fs::write(&target, b"old").unwrap();
+        save_file(&target, b"new").unwrap();
+        assert_eq!(std::fs::read(&target).unwrap(), b"new");
+        assert!(!d.path().join("abc.json.tmp").exists());
+        assert_eq!(tmp_path_of(&target), d.path().join("abc.json.tmp"));
+    }
+
+    #[test]
+    fn old_library_without_export_settings_still_loads_with_defaults() {
+        let d = tempfile::tempdir().unwrap();
+        std::fs::write(
+            library_path(d.path()),
+            br#"{"settings":{"schemaVersion":1,"booksFolder":"D:/b","pageTheme":"night"},"books":{}}"#,
+        )
+        .unwrap();
+        let (lib, notice) = load(d.path(), t0());
+        assert!(notice.is_none());
+        assert_eq!(lib.settings.export_folder, None);
+        assert!(lib.settings.export_errors.is_empty());
+        assert_eq!(lib.settings.page_theme, PageTheme::Night);
+    }
+
+    #[test]
+    fn export_settings_round_trip_in_camel_case() {
+        let d = tempfile::tempdir().unwrap();
+        let mut lib = Library::default();
+        lib.settings.export_folder = Some("D:/vault".into());
+        lib.settings.export_errors.insert("x".into(), "locked".into());
+        save(d.path(), &lib).unwrap();
+        let v: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(library_path(d.path())).unwrap()).unwrap();
+        assert_eq!(v["settings"]["exportErrors"]["x"], "locked");
+        assert_eq!(load(d.path(), t0()).0, lib);
     }
 }

@@ -1,4 +1,5 @@
 import { relativeDay, progressText } from "./lib/format.js";
+import { h } from "./lib/dom.js";
 import { openReader } from "./reader.js";
 import { failed, probeCovers } from "./covers.js";
 
@@ -8,18 +9,6 @@ const { getCurrentWindow } = window.__TAURI__.window;
 const { open: openDialog } = window.__TAURI__.dialog;
 
 const $ = (id) => document.getElementById(id);
-
-// Text goes in as text nodes, never as HTML.
-function h(tag, attrs = {}, ...children) {
-  const el = document.createElement(tag);
-  for (const [name, value] of Object.entries(attrs)) {
-    if (name === "class") el.className = value;
-    else if (name.startsWith("on")) el.addEventListener(name.slice(2), value);
-    else el.setAttribute(name, value);
-  }
-  el.append(...children.filter((c) => c != null));
-  return el;
-}
 
 let state = null;
 let localNotice = null; // errors raised here, not by Rust

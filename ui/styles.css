@@ -1,4 +1,5 @@
-/* Palette from spec 0001. Original uses the Paper tokens. */
+/* Palette from spec 0001. Original uses the Paper tokens.
+   --highlight is the one color besides covers (spec 0002). */
 :root,
 html[data-theme="original"],
 html[data-theme="paper"] {
@@ -7,6 +8,8 @@ html[data-theme="paper"] {
   --text: #2B2A28;
   --muted: #625E58;
   --line: #DDD8CD;
+  --highlight: rgb(255 213 79 / 0.35);
+  --highlight-blend: multiply;
   color-scheme: light;
 }
 
@@ -16,6 +19,8 @@ html[data-theme="night"] {
   --text: #D8D5CF;
   --muted: #9A968F;
   --line: #363636;
+  --highlight: rgb(217 160 65 / 0.3);
+  --highlight-blend: normal;
   color-scheme: dark;
 }
 
@@ -238,7 +243,7 @@ h1, h2, h3, p { margin: 0; }
 }
 
 /* Reader */
-#reader-view { display: flex; flex-direction: column; height: 100%; }
+#reader-view { display: flex; flex-direction: column; height: 100%; position: relative; }
 .reader-bar {
   display: flex;
   align-items: center;
@@ -275,3 +280,87 @@ h1, h2, h3, p { margin: 0; }
 .theme-toggle button + button { border-left: 1px solid var(--muted); }
 .theme-toggle button:hover { background: var(--line); }
 .theme-toggle button[aria-pressed="true"] { background: var(--text); color: var(--bg); }
+
+/* Highlights panel: laid over the right edge, the page does not move */
+.hl-panel {
+  position: absolute;
+  top: 40px;
+  right: 0;
+  bottom: 0;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  width: 360px;
+  max-width: 100%;
+  background: var(--bg);
+  border-left: 1px solid var(--line);
+}
+.hl-damaged { margin: 12px 16px 0; color: var(--muted); }
+.hl-scroll { flex: 1; min-height: 0; overflow-y: auto; padding: 12px 16px; }
+.hl-empty { color: var(--muted); }
+.hl-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 16px; }
+.hl-item { display: flex; flex-direction: column; gap: 6px; }
+.hl-quote {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
+  overflow: hidden;
+  width: 100%;
+  padding: 0 0 0 10px;
+  font: inherit;
+  color: var(--text);
+  text-align: left;
+  overflow-wrap: anywhere;
+  background: none;
+  border: 0;
+  border-left: 2px solid var(--muted);
+  cursor: pointer;
+}
+.hl-page { color: var(--muted); font-size: 12.5px; padding-left: 12px; }
+.hl-note {
+  width: 100%;
+  font: inherit;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 6px 8px;
+  resize: vertical;
+}
+.hl-note::placeholder { color: var(--muted); }
+.hl-delete { align-self: flex-end; padding: 2px 10px; font-size: 13px; }
+.hl-export {
+  flex: none;
+  padding: 10px 16px;
+  border-top: 1px solid var(--line);
+  background: var(--surface);
+}
+.hl-export-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.hl-export-path { min-width: 0; color: var(--muted); font-size: 12.5px; }
+.hl-export-error { margin-top: 6px; color: var(--muted); font-size: 12.5px; }
+
+/* Highlight bar: messages and Undo, over the bottom of the page */
+.hl-bar {
+  position: absolute;
+  left: 50%;
+  bottom: 20px;
+  z-index: 30;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  background: var(--bg);
+  border: 1px solid var(--muted);
+  border-radius: 6px;
+}
+.hl-undo {
+  font: inherit;
+  color: var(--text);
+  background: none;
+  border: 0;
+  padding: 0;
+  text-decoration: underline;
+  cursor: pointer;
+}
