@@ -13,7 +13,7 @@ use std::{fs, thread};
 const DEBOUNCE: Duration = Duration::from_millis(500);
 
 /// A file that was too new to read gets one more scan after this.
-pub const RETRY: Duration = Duration::from_secs(3);
+pub const RETRY: Duration = Duration::from_millis(1600);
 /// While nothing else happens, check this often that the folder is still there
 /// (and, while it is missing, whether it came back).
 pub const POLL: Duration = Duration::from_secs(10);
@@ -123,8 +123,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn too_new_file_waits_3s_otherwise_polls_every_10s() {
-        assert_eq!(next_wait(true), Duration::from_secs(3));
+    fn too_new_file_waits_1_6s_otherwise_polls_every_10s() {
+        assert_eq!(next_wait(true), Duration::from_millis(1600));
         assert_eq!(next_wait(false), Duration::from_secs(10));
     }
 
