@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { columnCount, stepFontSize, themeStyles, isExternalHref } from "../lib/epub.js";
+import { columnCount, stepFontSize, themeStyles, isExternalHref, blockScripts, SCRIPT_CSP } from "../lib/epub.js";
 
 test("columnCount: exactly 1000 px is one column, 1001 px is two", () => {
   // Catches >= instead of > (the spec says "wider than 1000").
@@ -70,4 +70,27 @@ test("isExternalHref: everything else is refused", () => {
   for (const href of ["javascript:alert(1)", "ftp://x.org/f", "data:text/html,hi", "file:///c:/x", "chapter2.xhtml", "//example.com", "", null, undefined, " http://x.org"]) {
     assert.equal(isExternalHref(href), false, String(href));
   }
+});
+
+test("blockScripts: puts a script-src 'none' CSP first in the head", () => {
+  // Catches a book page reaching the frame without the meta CSP (its scripts would run).
+  const out = blockScripts('<html xmlns="http://www.w3.org/1999/xhtml"><head><title>t</title><script>x()</script></head><body/></html>');
+  assert.equal(out, `<html xmlns="http://www.w3.org/1999/xhtml"><head>${SCRIPT_CSP}<title>t</title><script>x()</script></head><body/></html>`);
+});
+
+test("blockScripts: a head with attributes, any case", () => {
+  assert.equal(blockScripts('<HTML><HEAD lang="en"></HEAD></HTML>'), `<HTML><HEAD lang="en">${SCRIPT_CSP}</HEAD></HTML>`);
+});
+
+test("blockScripts: no head gets one after <html>, and <header> is not taken for <head>", () => {
+  // Catches the meta landing inside <header> in the body, where browsers ignore it.
+  assert.equal(blockScripts("<html><body><header>h</header></body></html>"),
+    `<html><head>${SCRIPT_CSP}</head><body><header>h</header></body></html>`);
+});
+
+test("blockScripts: an SVG page (no html element) loses its scripts and on* handlers", () => {
+  // Catches an SVG spine page slipping past: it has no head to put the CSP in.
+  assert.equal(
+    blockScripts(`<svg xmlns="http://www.w3.org/2000/svg" onload="x()"><script>x()</script><script href="a.js"/><rect onclick='y()'/></svg>`),
+    '<svg xmlns="http://www.w3.org/2000/svg"><rect/></svg>');
 });

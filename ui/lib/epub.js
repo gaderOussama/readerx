@@ -29,3 +29,17 @@ export function themeStyles(theme, { text, bg }, fontSize) {
 
 // Links that may leave through the system browser: absolute http, https, mailto.
 export const isExternalHref = (href) => /^(https?:|mailto:)/i.test(href ?? "");
+
+// Book pages become blob: documents, which do not get the app's CSP in WebView2,
+// so each page carries its own. SVG pages have no head, so their scripts are cut out.
+export const SCRIPT_CSP = `<meta http-equiv="Content-Security-Policy" content="script-src 'none'; object-src 'none'"/>`;
+
+export function blockScripts(markup) {
+  if (/<html[\s>]/i.test(markup)) {
+    if (/<head[\s>]/i.test(markup)) return markup.replace(/<head(\s[^>]*)?>/i, (tag) => tag + SCRIPT_CSP);
+    return markup.replace(/<html(\s[^>]*)?>/i, (tag) => `${tag}<head>${SCRIPT_CSP}</head>`);
+  }
+  return markup
+    .replace(/<script\b[^>]*\/>|<script\b[\s\S]*?<\/script\s*>/gi, "")
+    .replace(/\son\w+\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi, "");
+}

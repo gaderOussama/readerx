@@ -1,6 +1,6 @@
 import { initHighlights, startHighlights, attachHighlights, highlightKey, flushNotes, endHighlights, closePanelIfOpen } from "./highlights.js";
 import { closeToc, tocIsOpen } from "./toc.js";
-import { columnCount, stepFontSize, themeStyles, isExternalHref } from "./lib/epub.js";
+import { columnCount, stepFontSize, themeStyles, isExternalHref, blockScripts } from "./lib/epub.js";
 import { isProtected } from "./lib/epub-meta.js";
 
 const { invoke, convertFileSrc } = window.__TAURI__.core;
@@ -288,6 +288,13 @@ async function openEpub(session) {
       return;
     }
     const { book } = view;
+    // Before any page loads: book pages don't get the app's CSP (see blockScripts).
+    book.transformTarget?.addEventListener("load", (e) => {
+      if (e.detail.isScript) e.detail.allow = false;
+    });
+    book.transformTarget?.addEventListener("data", (e) => {
+      if (/html|svg/.test(e.detail.type)) e.detail.data = Promise.resolve(e.detail.data).then(blockScripts);
+    });
     const [rights, encryption] = await Promise.all([
       book.loadText("META-INF/rights.xml"),
       book.loadText("META-INF/encryption.xml"),
@@ -313,6 +320,7 @@ async function openEpub(session) {
     if (cur !== session) return;
     dropView(session);
     $("epub-flow").hidden = true;
+    $("toc-toggle").hidden = true;
     const note = document.createElement("p");
     note.className = "viewer-error";
     note.textContent = EPUB_ERROR;
