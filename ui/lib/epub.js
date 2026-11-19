@@ -55,7 +55,11 @@ export function stripRemoteCss(css) {
     .replace(new RegExp(String.raw`url\(\s*(?:"\s*${remote}[^"]*"|'\s*${remote}[^']*'|${remote}[^)]*)\s*\)`, "gi"), 'url("")');
 }
 
-const BAD_TAGS = new Set(["script", "iframe", "frame", "object", "embed", "set", "animate", "animatemotion", "animatetransform", "handler", "listener", "base"]);
+// foliate's paginator needs a <body>, so an SVG spine page would hang it; it goes inside an XHTML page.
+export const wrapSvgPage = (svg) =>
+  `<html xmlns="${XHTML_NS}"><head></head><body>${svg.replace(/^\s*<\?xml[^>]*\?>\s*/, "")}</body></html>`;
+
+const BAD_TAGS =new Set(["script", "iframe", "frame", "object", "embed", "set", "animate", "animatemotion", "animatetransform", "handler", "listener", "base"]);
 const URL_ATTRS = new Set(["src", "href", "poster", "data", "srcset", "background"]);
 const XHTML_NS = "http://www.w3.org/1999/xhtml";
 const squash = (value) => value.replace(/[\s\u0000-\u001f\u007f-\u009f]/g, "").toLowerCase();

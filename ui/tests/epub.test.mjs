@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { columnCount, stepFontSize, themeStyles, isExternalHref, allowResource, stripRemoteCss, PAGE_CSP } from "../lib/epub.js";
+import { columnCount, stepFontSize, themeStyles, isExternalHref, allowResource, stripRemoteCss, PAGE_CSP, wrapSvgPage } from "../lib/epub.js";
 
 test("columnCount: exactly 1000 px is one column, 1001 px is two", () => {
   // Catches >= instead of > (the spec says "wider than 1000").
@@ -122,4 +122,11 @@ test("stripRemoteCss: a local @import stays", () => {
 test("PAGE_CSP: denies everything by default and names no script source", () => {
   assert.ok(PAGE_CSP.startsWith("default-src 'none';"));
   assert.ok(!PAGE_CSP.includes("script-src"));
+});
+
+test("wrapSvgPage: an SVG page becomes the body of an XHTML page, its XML declaration dropped", () => {
+  const out = wrapSvgPage('<?xml version="1.0" encoding="utf-8"?>\n<svg xmlns="http://www.w3.org/2000/svg"><text>hi</text></svg>');
+  assert.ok(out.startsWith('<html xmlns="http://www.w3.org/1999/xhtml"><head></head><body>'));
+  assert.ok(out.includes('<body><svg xmlns="http://www.w3.org/2000/svg"><text>hi</text></svg></body>'));
+  assert.ok(!out.includes("<?xml"));
 });

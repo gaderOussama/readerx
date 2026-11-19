@@ -1,6 +1,6 @@
 import { initHighlights, startHighlights, attachHighlights, highlightKey, flushNotes, endHighlights, closePanelIfOpen } from "./highlights.js";
 import { closeToc, tocIsOpen } from "./toc.js";
-import { columnCount, stepFontSize, themeStyles, isExternalHref, allowResource, stripRemoteCss, sanitizePage } from "./lib/epub.js";
+import { columnCount, stepFontSize, themeStyles, isExternalHref, allowResource, stripRemoteCss, sanitizePage, wrapSvgPage } from "./lib/epub.js";
 import { failed } from "./covers.js";
 import { isProtected } from "./lib/epub-meta.js";
 
@@ -304,8 +304,12 @@ async function openEpub(session) {
       if (!allowResource(e.detail.type)) e.detail.allow = false;
     });
     book.transformTarget.addEventListener("data", (e) => {
-      const { type } = e.detail;
-      const clean = DOC_TYPES.includes(type) ? (text) => sanitizeText(text, type) : type === "text/css" ? stripRemoteCss : null;
+      let { type } = e.detail;
+      if (type === "image/svg+xml" && book.sections.some((s) => s.id === e.detail.name)) {
+        e.detail.type = type = "application/xhtml+xml";
+        e.detail.data = Promise.resolve(e.detail.data).then((text) => (typeof text === "string" ? wrapSvgPage(text) : ""));
+      }
+      const clean =DOC_TYPES.includes(type) ? (text) => sanitizeText(text, type) : type === "text/css" ? stripRemoteCss : null;
       // A non-string (a blob served raw) is dropped rather than let through.
       if (clean) e.detail.data = Promise.resolve(e.detail.data).then((text) => (typeof text === "string" ? clean(text) : ""));
     });
