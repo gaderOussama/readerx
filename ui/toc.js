@@ -10,7 +10,6 @@ const MIN_QUERY = 2;
 let shownView = null;
 let searchRun = 0;
 let searchIter = null;
-let relocateView = null;
 
 export const tocIsOpen = () => !$("toc-panel").hidden;
 
@@ -66,10 +65,9 @@ function openToc() {
   const view = currentEpubView();
   if (!view) return;
   if (view !== shownView) {
+    shownView?.removeEventListener("relocate", onRelocate);
     shownView = view;
     resetSearch();
-    relocateView?.removeEventListener("relocate", onRelocate);
-    relocateView = view;
     view.addEventListener("relocate", onRelocate);
   }
   const hasToc = renderContents(view);
@@ -80,7 +78,7 @@ function openToc() {
 }
 
 function onRelocate() {
-  if (tocIsOpen() && relocateView === currentEpubView()) markCurrent(relocateView);
+  if (tocIsOpen() && shownView === currentEpubView()) markCurrent(shownView);
 }
 
 // Safe to call when closed, or when the view is already gone.
@@ -99,9 +97,8 @@ export function closeToc() {
   clear();
   // A search still running may draw one more batch of marks before it stops.
   stopped.then(clear);
+  view?.removeEventListener("relocate", onRelocate);
   shownView = null;
-  relocateView?.removeEventListener("relocate", onRelocate);
-  relocateView = null;
 }
 
 async function runSearch() {

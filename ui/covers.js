@@ -50,33 +50,44 @@ async function drawCover(blob) {
 async function probeEpub(book) {
   let epub;
   let timer;
+  let timedOut = false;
+  // After a timeout `work` is the only one left holding the book, so it destroys it
+  // itself, whenever it ends (the late makeBook result included).
   const work = (async () => {
-    const { makeBook } = await import("./vendor/foliate-js/view.js");
-    const blob = await (await fetch(convertFileSrc(book.path))).blob();
-    epub = await makeBook(new File([blob], book.fileName));
-    if (isProtected(await epub.loadText("META-INF/rights.xml"), await epub.loadText("META-INF/encryption.xml"))) {
-      throw new Error("copy protected");
-    }
-    let png = null;
     try {
-      const cover = await epub.getCover(); // throws when the cover file is missing from the zip
-      if (cover) png = await drawCover(cover);
-    } catch {
-      // no usable cover: the title tile shows
+      const { makeBook } = await import("./vendor/foliate-js/view.js");
+      const blob = await (await fetch(convertFileSrc(book.path))).blob();
+      epub = await makeBook(new File([blob], book.fileName));
+      if (isProtected(await epub.loadText("META-INF/rights.xml"), await epub.loadText("META-INF/encryption.xml"))) {
+        throw new Error("copy protected");
+      }
+      let png = null;
+      try {
+        const cover = await epub.getCover(); // throws when the cover file is missing from the zip
+        if (cover) png = await drawCover(cover);
+      } catch {
+        // no usable cover: the title tile shows
+      }
+      return { title: pickString(epub.metadata?.title), author: pickString(epub.metadata?.author), png };
+    } finally {
+      if (timedOut) epub?.destroy?.();
     }
-    return { title: pickString(epub.metadata?.title), author: pickString(epub.metadata?.author), png };
   })();
   work.catch(() => {}); // after a timeout its late result is ignored
   const timeout = new Promise((_, reject) => {
-    timer = setTimeout(() => reject(new Error("timeout")), TIMEOUT_MS);
+    timer = setTimeout(() => {
+      timedOut = true;
+      reject(new Error("timeout"));
+    }, TIMEOUT_MS);
   });
   try {
     const { title, author, png } = await Promise.race([work, timeout]);
+    clearTimeout(timer); // a timeout after this point would leave the book undestroyed
     await invoke("set_meta", { id: book.id, metaTitle: title, metaAuthor: author, pageCount: null });
     if (png) await invoke("save_cover", { id: book.id, png: new Uint8Array(await png.arrayBuffer()) });
   } finally {
     clearTimeout(timer);
-    epub?.destroy?.();
+    if (!timedOut) epub?.destroy?.();
   }
 }
 
