@@ -2,14 +2,21 @@
 //! a running Tauri app. Error strings are the bare codes the screen expects.
 
 use crate::derive::{book_view, BookView};
-use crate::library::{iso, is_valid_id, PageTheme, PdfPosition, Position, Store, Zoom};
+use crate::library::{
+    iso, is_valid_id, EpubLayout, EpubPosition, Format, PageTheme, PdfPosition, Position, Store, Zoom,
+    EPUB_FONT_SIZES,
+};
 use chrono::{DateTime, Utc};
 use serde::Serialize;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 const MAX_COVER_BYTES: usize = 2 * 1024 * 1024;
 const PNG_SIGNATURE: &[u8] = &[0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A];
 const ZOOM_NAMES: [&str; 4] = ["auto", "page-actual", "page-fit", "page-width"];
+const MAX_CFI_CHARS: usize = 2000;
+const MAX_CHAPTER_CHARS: usize = 200;
+/// An EPUB counts as finished from this fraction on (or on its last page).
+const EPUB_FINISHED_FRACTION: f64 = 0.98;
 
 #[derive(Serialize, Debug, PartialEq)]
 pub struct Opened {
@@ -69,48 +76,88 @@ fn validate_position(p: &PdfPosition, page_count: i64) -> Result<(), String> {
     }
 }
 
+/// Refuses a bad cfi or fraction. The chapter label comes from the book, so a
+/// long one is cut to 200 characters (on a character boundary) instead of
+/// refusing the save.
+fn validate_epub_position(p: &mut EpubPosition) -> Result<(), String> {
+    if !p.cfi.starts_with("epubcfi(")
+        || p.cfi.chars().count() > MAX_CFI_CHARS
+        || !p.fraction.is_finite()
+        || !(0.0..=1.0).contains(&p.fraction)
+    {
+        return err("bad_position");
+    }
+    p.chapter = p
+        .chapter
+        .take()
+        .map(|c| c.trim().chars().take(MAX_CHAPTER_CHARS).collect::<String>())
+        .filter(|c| !c.is_empty());
+    Ok(())
+}
+
+/// `page_count` is required for a PDF position and ignored for an EPUB one;
+/// `at_end` is only read for an EPUB (a PDF position carries its own flag).
 pub fn save_position(
     store: &mut Store,
     id: &str,
-    position: Position,
-    page_count: i64,
+    mut position: Position,
+    page_count: Option<i64>,
+    at_end: bool,
     now: DateTime<Utc>,
 ) -> Result<Saved, String> {
-    let Position::Pdf(p) = &position;
     let Some(book) = store.lib.books.get_mut(id) else {
         return err("unknown_book");
     };
-    validate_position(p, page_count)?;
-
-    let at_end = |q: &PdfPosition| q.at_end || q.page == page_count;
     // A null previous position counts as not at end.
-    let was_at_end = matches!(&book.position, Some(Position::Pdf(q)) if at_end(q));
-    if !was_at_end && at_end(p) && book.finished_at.is_none() {
+    let (progress, is_end, was_end) = match (&mut position, book.format) {
+        (Position::Pdf(p), Format::Pdf) => {
+            let Some(page_count) = page_count else {
+                return err("bad_position");
+            };
+            validate_position(p, page_count)?;
+            let end = |q: &PdfPosition| q.at_end || q.page == page_count;
+            let was = matches!(&book.position, Some(Position::Pdf(q)) if end(q));
+            book.page_count = Some(page_count as u32);
+            ((p.page as f64 / page_count as f64).clamp(0.0, 1.0), end(p), was)
+        }
+        (Position::Epub(p), Format::Epub) => {
+            validate_epub_position(p)?;
+            let was = matches!(
+                &book.position,
+                Some(Position::Epub(q)) if q.fraction >= EPUB_FINISHED_FRACTION
+            );
+            (p.fraction, at_end || p.fraction >= EPUB_FINISHED_FRACTION, was)
+        }
+        _ => return err("bad_position"),
+    };
+    if !was_end && is_end && book.finished_at.is_none() {
         book.finished_at = Some(iso(now));
     }
-    book.progress = (p.page as f64 / page_count as f64).clamp(0.0, 1.0);
-    book.page_count = Some(page_count as u32);
+    book.progress = progress;
     book.position = Some(position);
     let saved = Saved { progress: book.progress, finished_at: book.finished_at.clone() };
     store.persist();
     Ok(saved)
 }
 
+/// `page_count` is null for an EPUB. Always marks the cover as checked.
 pub fn set_meta(
     store: &mut Store,
     id: &str,
     meta_title: Option<String>,
-    page_count: i64,
+    meta_author: Option<String>,
+    page_count: Option<i64>,
 ) -> Result<(), String> {
     let Some(book) = store.lib.books.get_mut(id) else {
         return err("unknown_book");
     };
-    book.meta_title = meta_title.map(|t| t.trim().to_string()).filter(|t| !t.is_empty());
-    if let Ok(n) = u32::try_from(page_count) {
-        if n >= 1 {
-            book.page_count = Some(n);
-        }
+    let clean = |s: String| Some(s.trim().to_string()).filter(|t| !t.is_empty());
+    book.meta_title = meta_title.and_then(clean);
+    book.meta_author = meta_author.and_then(clean);
+    if let Some(n) = page_count.and_then(|n| u32::try_from(n).ok()).filter(|&n| n >= 1) {
+        book.page_count = Some(n);
     }
+    book.cover_checked = true;
     store.persist();
     Ok(())
 }
@@ -161,11 +208,35 @@ pub fn set_page_theme(store: &mut Store, theme: &str) -> Result<(), String> {
     Ok(())
 }
 
+pub fn set_epub_settings(store: &mut Store, font_size: i64, layout: &str) -> Result<(), String> {
+    let size = u32::try_from(font_size).ok().filter(|n| EPUB_FONT_SIZES.contains(n));
+    let (Some(size), Some(layout)) = (size, EpubLayout::parse(layout)) else {
+        return err("bad_setting");
+    };
+    store.lib.settings.epub_font_size = size;
+    store.lib.settings.epub_layout = layout;
+    store.persist();
+    Ok(())
+}
+
+/// The data folder and page count for a highlight command. `unknown_book` for
+/// an unknown id (or one that is not the exact hash shape, so it never reaches
+/// a path), `not_supported` for an EPUB.
+pub fn highlight_book(store: &Store, id: &str) -> Result<(PathBuf, Option<u32>), String> {
+    match store.lib.books.get(id) {
+        Some(b) if is_valid_id(id) => match b.format {
+            Format::Pdf => Ok((store.dir.clone(), b.page_count)),
+            Format::Epub => err("not_supported"),
+        },
+        _ => err("unknown_book"),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::derive::Section;
-    use crate::library::{Book, Format};
+    use crate::library::{Book, EpubPosition, Format};
     use chrono::TimeZone;
 
     fn t(sec: u32) -> DateTime<Utc> {
@@ -209,14 +280,45 @@ mod tests {
                 position: None,
                 progress: 0.0,
                 finished_at: None,
+                meta_author: None,
+                cover_checked: false,
             },
         );
         s.present.insert(id());
+        let epub = Book {
+            id: epub_id(),
+            path: "C:\\b\\a.epub".into(),
+            file_name: "a.epub".into(),
+            format: Format::Epub,
+            ..s.lib.books[&id()].clone()
+        };
+        s.lib.books.insert(epub_id(), epub);
+        s.present.insert(epub_id());
         (d, s)
     }
 
+    fn epub_id() -> String {
+        format!("{}-20", "e".repeat(64))
+    }
+
+    fn epos(cfi: &str, fraction: f64, chapter: Option<&str>) -> Position {
+        Position::Epub(EpubPosition {
+            cfi: cfi.into(),
+            fraction,
+            chapter: chapter.map(String::from),
+        })
+    }
+
+    fn at(fraction: f64) -> Position {
+        epos("epubcfi(/6/4!/4/2)", fraction, None)
+    }
+
+    fn save_epub(s: &mut Store, p: Position, at_end: bool) -> Result<Saved, String> {
+        save_position(s, &epub_id(), p, None, at_end, t(30))
+    }
+
     fn save(s: &mut Store, p: Position, count: i64) -> Result<Saved, String> {
-        save_position(s, &id(), p, count, t(30))
+        save_position(s, &id(), p, Some(count), false, t(30))
     }
 
     fn finished_at(s: &Store) -> Option<String> {
@@ -321,8 +423,8 @@ mod tests {
         save(&mut s, pos(379, false), 380).unwrap();
         save(&mut s, pos(380, false), 380).unwrap();
         let first = finished_at(&s);
-        save_position(&mut s, &id(), pos(1, false), 380, t(55)).unwrap();
-        save_position(&mut s, &id(), pos(380, false), 380, t(58)).unwrap();
+        save_position(&mut s, &id(), pos(1, false), Some(380), false, t(55)).unwrap();
+        save_position(&mut s, &id(), pos(380, false), Some(380), false, t(58)).unwrap();
         assert_eq!(finished_at(&s), first);
     }
 
@@ -379,8 +481,11 @@ mod tests {
         let (_d, mut s) = fixture();
         let nope = format!("{}-1", "c".repeat(64));
         assert_eq!(open_book(&mut s, &nope, t(1)), Err("unknown_book".into()));
-        assert_eq!(save_position(&mut s, &nope, pos(1, false), 10, t(1)), Err("unknown_book".into()));
-        assert_eq!(set_meta(&mut s, &nope, None, 3), Err("unknown_book".into()));
+        assert_eq!(
+            save_position(&mut s, &nope, pos(1, false), Some(10), false, t(1)),
+            Err("unknown_book".into())
+        );
+        assert_eq!(set_meta(&mut s, &nope, None, None, Some(3)), Err("unknown_book".into()));
         assert_eq!(save_cover(&s, &nope, PNG_SIGNATURE), Err("unknown_book".into()));
         assert_eq!(set_finished(&mut s, &nope, true, t(1)).unwrap_err(), "unknown_book");
     }
@@ -405,14 +510,181 @@ mod tests {
     #[test]
     fn set_meta_stores_trimmed_title_and_page_count() {
         let (_d, mut s) = fixture();
-        set_meta(&mut s, &id(), Some("  Dune ".into()), 412).unwrap();
+        set_meta(&mut s, &id(), Some("  Dune ".into()), None, Some(412)).unwrap();
         let b = &s.lib.books[&id()];
         assert_eq!(b.meta_title.as_deref(), Some("Dune"));
         assert_eq!(b.page_count, Some(412));
-        set_meta(&mut s, &id(), Some("   ".into()), 0).unwrap();
+        set_meta(&mut s, &id(), Some("   ".into()), None, Some(0)).unwrap();
         let b = &s.lib.books[&id()];
         assert_eq!(b.meta_title, None);
         assert_eq!(b.page_count, Some(412), "a bad page count is ignored");
+    }
+
+    #[test]
+    fn epub_position_saves_and_progress_equals_fraction() {
+        let (_d, mut s) = fixture();
+        let p = epos("epubcfi(/6/4!/4/2)", 0.34, Some("Chapter 3"));
+        let r = save_epub(&mut s, p.clone(), false).unwrap();
+        assert_eq!(r, Saved { progress: 0.34, finished_at: None });
+        let b = &s.lib.books[&epub_id()];
+        assert_eq!(b.position, Some(p));
+        assert_eq!(b.progress, 0.34);
+        assert_eq!(b.page_count, None, "an EPUB never gets a page count");
+    }
+
+    #[test]
+    fn bad_epub_positions_are_rejected_and_change_nothing() {
+        let (_d, mut s) = fixture();
+        let before = s.lib.clone();
+        let long = format!("epubcfi({}", "1".repeat(2000));
+        let cases = [
+            epos("/6/4!/4/2", 0.5, None),
+            epos("EPUBCFI(/6/4)", 0.5, None),
+            epos("", 0.5, None),
+            epos(&long, 0.5, None),
+            epos("epubcfi(/6/4)", f64::NAN, None),
+            epos("epubcfi(/6/4)", 1.5, None),
+            epos("epubcfi(/6/4)", -0.1, None),
+            epos("epubcfi(/6/4)", f64::INFINITY, None),
+        ];
+        for p in cases {
+            assert_eq!(save_epub(&mut s, p.clone(), false), Err("bad_position".into()), "{p:?}");
+        }
+        assert_eq!(s.lib, before);
+    }
+
+    #[test]
+    fn epub_cfi_of_exactly_2000_chars_and_fraction_edges_are_accepted() {
+        let (_d, mut s) = fixture();
+        let edge = format!("epubcfi({}", "1".repeat(2000 - "epubcfi(".len()));
+        assert_eq!(edge.chars().count(), 2000);
+        assert!(save_epub(&mut s, epos(&edge, 0.0, None), false).is_ok());
+        assert!(save_epub(&mut s, epos(&edge, 1.0, None), false).is_ok());
+    }
+
+    #[test]
+    fn epub_chapter_is_trimmed_and_cut_to_200_chars_on_a_char_boundary() {
+        let (_d, mut s) = fixture();
+        let chapter = |s: &Store| match &s.lib.books[&epub_id()].position {
+            Some(Position::Epub(p)) => p.chapter.clone(),
+            other => panic!("{other:?}"),
+        };
+        save_epub(&mut s, epos("epubcfi(/6/4)", 0.5, Some("  Chapter 3  ")), false).unwrap();
+        assert_eq!(chapter(&s).as_deref(), Some("Chapter 3"));
+        save_epub(&mut s, epos("epubcfi(/6/4)", 0.5, Some(&"é".repeat(250))), false).unwrap();
+        assert_eq!(chapter(&s), Some("é".repeat(200)));
+        save_epub(&mut s, epos("epubcfi(/6/4)", 0.5, Some("   ")), false).unwrap();
+        assert_eq!(chapter(&s), None);
+    }
+
+    #[test]
+    fn position_kind_must_match_the_book_format() {
+        let (_d, mut s) = fixture();
+        let before = s.lib.clone();
+        assert_eq!(
+            save_position(&mut s, &epub_id(), pos(1, false), Some(10), false, t(30)),
+            Err("bad_position".into()),
+            "pdf position on an epub book"
+        );
+        assert_eq!(
+            save_position(&mut s, &id(), at(0.5), Some(10), false, t(30)),
+            Err("bad_position".into()),
+            "epub position on a pdf book"
+        );
+        assert_eq!(s.lib, before);
+    }
+
+    #[test]
+    fn pdf_save_without_a_page_count_is_refused() {
+        let (_d, mut s) = fixture();
+        let before = s.lib.clone();
+        assert_eq!(
+            save_position(&mut s, &id(), pos(1, false), None, false, t(30)),
+            Err("bad_position".into())
+        );
+        assert_eq!(s.lib, before);
+    }
+
+    #[test]
+    fn epub_is_finished_at_98_percent_but_not_at_97() {
+        let (_d, mut s) = fixture();
+        save_epub(&mut s, at(0.97), false).unwrap();
+        assert_eq!(s.lib.books[&epub_id()].finished_at, None);
+        let r = save_epub(&mut s, at(0.98), false).unwrap();
+        assert_eq!(s.lib.books[&epub_id()].finished_at, Some(iso(t(30))));
+        assert_eq!(r.finished_at, Some(iso(t(30))));
+    }
+
+    #[test]
+    fn epub_at_end_flag_finishes_at_half_way_and_a_later_save_at_10_percent_keeps_it() {
+        let (_d, mut s) = fixture();
+        save_epub(&mut s, at(0.5), true).unwrap();
+        let first = s.lib.books[&epub_id()].finished_at.clone();
+        assert!(first.is_some());
+        save_position(&mut s, &epub_id(), at(0.1), None, false, t(45)).unwrap();
+        assert_eq!(s.lib.books[&epub_id()].finished_at, first);
+        assert_eq!(s.lib.books[&epub_id()].progress, 0.1);
+    }
+
+    #[test]
+    fn epub_marked_unfinished_at_the_end_is_not_finished_again_by_the_same_spot() {
+        let (_d, mut s) = fixture();
+        save_epub(&mut s, at(0.99), false).unwrap();
+        set_finished(&mut s, &epub_id(), false, t(40)).unwrap();
+        save_epub(&mut s, at(0.99), false).unwrap();
+        assert_eq!(s.lib.books[&epub_id()].finished_at, None);
+    }
+
+    #[test]
+    fn set_meta_with_an_author_and_no_page_count_stores_the_author_and_sets_cover_checked() {
+        let (_d, mut s) = fixture();
+        set_meta(&mut s, &epub_id(), Some("Dune".into()), Some("  Frank Herbert ".into()), None)
+            .unwrap();
+        let b = &s.lib.books[&epub_id()];
+        assert_eq!(b.meta_title.as_deref(), Some("Dune"));
+        assert_eq!(b.meta_author.as_deref(), Some("Frank Herbert"));
+        assert_eq!(b.page_count, None);
+        assert!(b.cover_checked);
+        set_meta(&mut s, &epub_id(), None, Some("  ".into()), None).unwrap();
+        assert_eq!(s.lib.books[&epub_id()].meta_author, None);
+    }
+
+    #[test]
+    fn set_meta_on_a_pdf_also_sets_cover_checked() {
+        let (_d, mut s) = fixture();
+        assert!(!s.lib.books[&id()].cover_checked);
+        set_meta(&mut s, &id(), None, None, Some(3)).unwrap();
+        assert!(s.lib.books[&id()].cover_checked);
+    }
+
+    #[test]
+    fn epub_settings_store_valid_values_and_refuse_others_with_bad_setting() {
+        let (_d, mut s) = fixture();
+        assert_eq!(s.lib.settings.epub_font_size, 100);
+        for size in [80, 90, 100, 115, 130, 160, 200] {
+            set_epub_settings(&mut s, size, "scrolled").unwrap();
+            assert_eq!(s.lib.settings.epub_font_size, size as u32);
+        }
+        assert_eq!(s.lib.settings.epub_layout, EpubLayout::Scrolled);
+        set_epub_settings(&mut s, 115, "paginated").unwrap();
+        assert_eq!(s.lib.settings.epub_layout, EpubLayout::Paginated);
+
+        let before = s.lib.settings.clone();
+        for (size, layout) in [(95, "paginated"), (115, "columns"), (115, "Paginated"), (-100, "paginated")] {
+            assert_eq!(set_epub_settings(&mut s, size, layout), Err("bad_setting".into()), "{size} {layout}");
+        }
+        assert_eq!(s.lib.settings, before);
+    }
+
+    #[test]
+    fn highlight_commands_refuse_an_epub_book_but_a_pdf_book_still_works() {
+        let (d, s) = fixture();
+        // every highlight command in lib.rs finds its book through this one function
+        assert_eq!(highlight_book(&s, &epub_id()), Err("not_supported".into()));
+        assert_eq!(highlight_book(&s, &id()), Ok((d.path().to_path_buf(), None)));
+        let nope = format!("{}-1", "c".repeat(64));
+        assert_eq!(highlight_book(&s, &nope), Err("unknown_book".into()));
+        assert_eq!(highlight_book(&s, "../../evil"), Err("unknown_book".into()));
     }
 
     #[test]

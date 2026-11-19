@@ -982,6 +982,8 @@ mod tests {
             position: None,
             progress: 0.2,
             finished_at: None,
+            meta_author: None,
+            cover_checked: false,
         }
     }
 

@@ -11,6 +11,7 @@ fn main() {
         "save_cover",
         "set_finished",
         "set_page_theme",
+        "set_epub_settings",
         "get_highlights",
         "add_highlights",
         "set_note",

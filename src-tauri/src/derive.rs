@@ -50,16 +50,14 @@ pub fn display_title(meta_title: Option<&str>, file_name: &str) -> String {
             return t.to_string();
         }
     }
-    match file_name.len().checked_sub(4) {
-        Some(i)
-            if file_name.is_char_boundary(i)
-                && file_name[i..].eq_ignore_ascii_case(".pdf")
-                && i > 0 =>
-        {
-            file_name[..i].to_string()
+    for ext in [".pdf", ".epub"] {
+        if let Some(i) = file_name.len().checked_sub(ext.len()) {
+            if i > 0 && file_name.is_char_boundary(i) && file_name[i..].eq_ignore_ascii_case(ext) {
+                return file_name[..i].to_string();
+            }
         }
-        _ => file_name.to_string(),
     }
+    file_name.to_string()
 }
 
 fn is_junk_title(t: &str) -> bool {
@@ -141,11 +139,11 @@ fn title_of(b: &Book) -> String {
     display_title(b.meta_title.as_deref(), &b.file_name)
 }
 
-pub fn folder_status(folder: Option<&str>, readable: bool, pdf_count: usize) -> FolderStatus {
+pub fn folder_status(folder: Option<&str>, readable: bool, book_count: usize) -> FolderStatus {
     match folder {
         None => FolderStatus::Unset,
         Some(_) if !readable => FolderStatus::Missing,
-        Some(_) if pdf_count == 0 => FolderStatus::Empty,
+        Some(_) if book_count == 0 => FolderStatus::Empty,
         Some(_) => FolderStatus::Ok,
     }
 }
@@ -174,7 +172,7 @@ pub fn state_view(store: &Store) -> StateView {
             .map(|b| book_view(store, b))
             .collect(),
         continue_id: continue_id(&store.lib, &store.present),
-        folder_status: folder_status(folder, store.folder_readable, store.pdf_count),
+        folder_status: folder_status(folder, store.folder_readable, store.book_count),
         notice: store.notice.clone(),
     }
 }
@@ -199,6 +197,8 @@ mod tests {
             position: None,
             progress: 0.0,
             finished_at: None,
+            meta_author: None,
+            cover_checked: false,
         }
     }
 
@@ -263,6 +263,15 @@ mod tests {
         assert_eq!(display_title(None, "weird"), "weird");
         assert_eq!(display_title(None, ".pdf"), ".pdf");
         assert_eq!(display_title(None, "été.pdf"), "été");
+    }
+
+    #[test]
+    fn epub_file_name_loses_its_suffix_in_any_case() {
+        assert_eq!(display_title(None, "My Book.epub"), "My Book");
+        assert_eq!(display_title(None, "My Book.EPUB"), "My Book");
+        assert_eq!(display_title(Some("scan.pdf"), "été.Epub"), "été");
+        assert_eq!(display_title(None, ".epub"), ".epub");
+        assert_eq!(display_title(None, "pub"), "pub");
     }
 
     #[test]
@@ -352,7 +361,7 @@ mod tests {
         store.present.insert(id.clone());
         store.lib.settings.books_folder = Some("C:\\b".into());
         store.folder_readable = true;
-        store.pdf_count = 1;
+        store.book_count = 1;
         let v = serde_json::to_value(state_view(&store)).unwrap();
         assert_eq!(v["folderStatus"], "ok");
         assert_eq!(v["continueId"], id.as_str());
@@ -365,6 +374,10 @@ mod tests {
         assert!(b["coverPath"].is_null());
         assert_eq!(b["format"], "pdf");
         assert_eq!(b["position"]["kind"], "pdf");
+        assert!(b["metaAuthor"].is_null());
+        assert_eq!(b["coverChecked"], false);
+        assert_eq!(v["settings"]["epubFontSize"], 100);
+        assert_eq!(v["settings"]["epubLayout"], "paginated");
 
         std::fs::create_dir_all(store.covers_dir()).unwrap();
         std::fs::write(store.covers_dir().join(format!("{id}.png")), b"x").unwrap();

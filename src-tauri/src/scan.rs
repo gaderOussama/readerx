@@ -26,6 +26,7 @@ pub struct Found {
     pub file_name: String,
     pub size_bytes: u64,
     pub mtime_ms: i64,
+    pub format: Format,
 }
 
 #[derive(Debug, Default)]
@@ -33,8 +34,8 @@ pub struct ScanOutput {
     pub found: Vec<Found>,
     /// False when the books folder is unset or cannot be read.
     pub readable: bool,
-    /// PDFs seen, including ones skipped for being too new.
-    pub pdf_count: usize,
+    /// PDFs and EPUBs seen, including ones skipped for being too new.
+    pub book_count: usize,
     /// Some file was too new: scan again shortly.
     pub skipped_new: bool,
 }
@@ -56,7 +57,7 @@ pub fn cache_of(lib: &Library) -> HashCache {
 
 struct Walk {
     files: Vec<(PathBuf, u64, i64)>,
-    pdf_count: usize,
+    book_count: usize,
     skipped_new: bool,
 }
 
@@ -73,10 +74,10 @@ fn walk(dir: &Path, now_ms: i64, out: &mut Walk) -> bool {
         let path = entry.path();
         if ft.is_dir() {
             walk(&path, now_ms, out);
-        } else if ft.is_file() && is_pdf(&path) {
+        } else if ft.is_file() && format_of(&path).is_some() {
             let Ok(meta) = entry.metadata() else { continue };
             let Some(mtime_ms) = mtime_ms(&meta) else { continue };
-            out.pdf_count += 1;
+            out.book_count += 1;
             if (0..MIN_AGE_MS).contains(&(now_ms - mtime_ms)) {
                 out.skipped_new = true;
                 continue;
@@ -87,8 +88,15 @@ fn walk(dir: &Path, now_ms: i64, out: &mut Walk) -> bool {
     true
 }
 
-fn is_pdf(path: &Path) -> bool {
-    path.extension().is_some_and(|e| e.eq_ignore_ascii_case("pdf"))
+fn format_of(path: &Path) -> Option<Format> {
+    let ext = path.extension()?;
+    if ext.eq_ignore_ascii_case("pdf") {
+        Some(Format::Pdf)
+    } else if ext.eq_ignore_ascii_case("epub") {
+        Some(Format::Epub)
+    } else {
+        None
+    }
 }
 
 fn mtime_ms(meta: &fs::Metadata) -> Option<i64> {
@@ -99,7 +107,7 @@ fn mtime_ms(meta: &fs::Metadata) -> Option<i64> {
 /// Walk `folder`, reuse cached ids where (path, size, mtime) match, hash the rest.
 /// Identical content under two paths keeps the first path in sorted order.
 pub fn collect(folder: &Path, cache: &HashCache, now_ms: i64, hasher: &mut Hasher) -> ScanOutput {
-    let mut w = Walk { files: Vec::new(), pdf_count: 0, skipped_new: false };
+    let mut w = Walk { files: Vec::new(), book_count: 0, skipped_new: false };
     let readable = walk(folder, now_ms, &mut w);
     let mut files: Vec<(String, u64, i64, PathBuf)> = w
         .files
@@ -125,16 +133,17 @@ pub fn collect(folder: &Path, cache: &HashCache, now_ms: i64, hasher: &mut Hashe
             .file_name()
             .map(|n| n.to_string_lossy().into_owned())
             .unwrap_or_default();
-        found.push(Found { id, path, file_name, size_bytes: size, mtime_ms: mtime });
+        let format = format_of(&p).unwrap_or(Format::Pdf); // walk only keeps books
+        found.push(Found { id, path, file_name, size_bytes: size, mtime_ms: mtime, format });
     }
-    ScanOutput { found, readable, pdf_count: w.pdf_count, skipped_new: w.skipped_new }
+    ScanOutput { found, readable, book_count: w.book_count, skipped_new: w.skipped_new }
 }
 
 /// Apply a scan to the store. Never deletes or changes a record because its
 /// file is gone; only the in-memory `present` set changes.
 pub fn merge(store: &mut Store, out: ScanOutput, now: DateTime<Utc>) {
     store.folder_readable = out.readable;
-    store.pdf_count = out.pdf_count;
+    store.book_count = out.book_count;
     store.present.clear();
     if !out.readable {
         return;
@@ -164,7 +173,7 @@ pub fn merge(store: &mut Store, out: ScanOutput, now: DateTime<Utc>) {
                         path: f.path,
                         file_name: f.file_name,
                         meta_title: None,
-                        format: Format::Pdf,
+                        format: f.format,
                         size_bytes: f.size_bytes,
                         mtime_ms: f.mtime_ms,
                         page_count: None,
@@ -173,6 +182,8 @@ pub fn merge(store: &mut Store, out: ScanOutput, now: DateTime<Utc>) {
                         position: None,
                         progress: 0.0,
                         finished_at: None,
+                        meta_author: None,
+                        cover_checked: false,
                     },
                 );
                 dirty = true;
@@ -310,8 +321,40 @@ mod tests {
         rescan(&m);
         let s = lock(&m);
         assert_eq!(s.present.len(), 3);
-        assert_eq!(s.pdf_count, 3);
+        assert_eq!(s.book_count, 3);
         assert!(s.folder_readable);
+    }
+
+    #[test]
+    fn epub_in_any_case_is_a_book_with_format_epub_and_a_pdf_stays_pdf() {
+        let (books, _data, m) = setup();
+        write(books.path(), "a.pdf", b"1");
+        write(books.path(), "deep/B.epub", b"22");
+        write(books.path(), "C.EPUB", b"333");
+        write(books.path(), "d.Epub", b"4444");
+        write(books.path(), "book.epub.bak", b"55555");
+        write(books.path(), "epub", b"666666");
+        rescan(&m);
+        let s = lock(&m);
+        assert_eq!(s.present.len(), 4);
+        let format_of = |name: &str| {
+            s.lib.books.values().find(|b| b.file_name == name).map(|b| b.format)
+        };
+        assert_eq!(format_of("a.pdf"), Some(Format::Pdf));
+        for name in ["B.epub", "C.EPUB", "d.Epub"] {
+            assert_eq!(format_of(name), Some(Format::Epub), "{name}");
+        }
+    }
+
+    #[test]
+    fn a_folder_with_only_epubs_is_not_empty_because_the_count_covers_both_formats() {
+        let (books, _data, m) = setup();
+        write(books.path(), "only.epub", b"1");
+        rescan(&m);
+        assert_eq!(lock(&m).book_count, 1);
+        write(books.path(), "also.pdf", b"22");
+        rescan(&m);
+        assert_eq!(lock(&m).book_count, 2);
     }
 
     #[test]
@@ -391,7 +434,7 @@ mod tests {
         assert!(again);
         assert!(lock(&m).present.is_empty());
         assert!(lock(&m).lib.books.is_empty());
-        assert_eq!(lock(&m).pdf_count, 1);
+        assert_eq!(lock(&m).book_count, 1);
 
         let again = run(&m, Utc::now() + chrono::Duration::seconds(3), &mut fingerprint);
         assert!(!again);
