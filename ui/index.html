@@ -25,6 +25,15 @@
       <button id="reader-back" class="btn" type="button">&larr; Back</button>
       <div id="reader-title" class="reader-title"></div>
       <button id="hl-toggle" class="btn" type="button" aria-expanded="false" aria-controls="hl-panel">Highlights (0)</button>
+      <button id="toc-toggle" class="btn" type="button" aria-expanded="false" aria-controls="toc-panel" hidden>Contents</button>
+      <div id="epub-flow" class="epub-flow" hidden>
+        <button id="epub-smaller" class="btn" type="button" aria-label="Smaller text">A&minus;</button>
+        <button id="epub-bigger" class="btn" type="button" aria-label="Bigger text">A+</button>
+        <div class="theme-toggle" role="group" aria-label="Page layout">
+          <button type="button" data-layout-choice="paginated" aria-pressed="true">Pages</button>
+          <button type="button" data-layout-choice="scrolled" aria-pressed="false">Scroll</button>
+        </div>
+      </div>
       <div class="theme-toggle" role="group" aria-label="Page theme">
         <button type="button" data-theme-choice="original" aria-pressed="false">Original</button>
         <button type="button" data-theme-choice="paper" aria-pressed="false">Paper</button>
