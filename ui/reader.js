@@ -1,6 +1,7 @@
 import { initHighlights, startHighlights, attachHighlights, highlightKey, flushNotes, endHighlights, closePanelIfOpen } from "./highlights.js";
 import { closeToc, tocIsOpen } from "./toc.js";
-import { columnCount, stepFontSize, themeStyles, isExternalHref, blockScripts } from "./lib/epub.js";
+import { columnCount, stepFontSize, themeStyles, isExternalHref, allowResource, stripRemoteCss, sanitizePage } from "./lib/epub.js";
+import { failed } from "./covers.js";
 import { isProtected } from "./lib/epub-meta.js";
 
 const { invoke, convertFileSrc } = window.__TAURI__.core;
@@ -162,15 +163,14 @@ function flush(session) {
 
 async function send(session) {
   const { app, pending } = session;
-  const epub = session.format === "epub";
-  if (!pending || !(epub ? session.ready : app?.isInitialViewSet === true)) return;
+  const isEpub = session.format === "epub";
+  if (!pending || !(isEpub ? session.ready : app?.isInitialViewSet === true)) return;
   session.pending = null;
-  // For EPUB `atEnd` travels beside the position and there is no page count.
-  const { atEnd, ...position } = pending;
-  session.position = epub ? position : pending;
+  session.position = pending;
   try {
-    await invoke("save_position", epub
-      ? { id: session.id, position, atEnd }
+    // An EPUB has no page count.
+    await invoke("save_position", isEpub
+      ? { id: session.id, position: pending }
       : { id: session.id, position: pending, pageCount: app.pagesCount });
   } catch (err) {
     console.error("save_position failed", err);
@@ -260,6 +260,16 @@ function markLayout(layout) {
   }
 }
 
+const DOC_TYPES = ["application/xhtml+xml", "text/html", "image/svg+xml"];
+
+// A book page parsed, sanitized and written out again; empty when it won't parse (fails closed).
+function sanitizeText(text, type) {
+  const doc = new DOMParser().parseFromString(text, type);
+  if (doc.querySelector("parsererror")) return "";
+  sanitizePage(doc);
+  return type === "text/html" ? `<!DOCTYPE html>${doc.documentElement.outerHTML}` : new XMLSerializer().serializeToString(doc);
+}
+
 async function openEpub(session) {
   const host = $("viewer-host");
   document.addEventListener("keydown", onEpubKey, true);
@@ -288,12 +298,16 @@ async function openEpub(session) {
       return;
     }
     const { book } = view;
-    // Before any page loads: book pages don't get the app's CSP (see blockScripts).
-    book.transformTarget?.addEventListener("load", (e) => {
-      if (e.detail.isScript) e.detail.allow = false;
+    // Before any page loads: book pages don't get the app's CSP, so the pages are sanitized here.
+    // No `?.`: a missing transformTarget must throw, never skip the security hook.
+    book.transformTarget.addEventListener("load", (e) => {
+      if (!allowResource(e.detail.type)) e.detail.allow = false;
     });
-    book.transformTarget?.addEventListener("data", (e) => {
-      if (/html|svg/.test(e.detail.type)) e.detail.data = Promise.resolve(e.detail.data).then(blockScripts);
+    book.transformTarget.addEventListener("data", (e) => {
+      const { type } = e.detail;
+      const clean = DOC_TYPES.includes(type) ? (text) => sanitizeText(text, type) : type === "text/css" ? stripRemoteCss : null;
+      // A non-string (a blob served raw) is dropped rather than let through.
+      if (clean) e.detail.data = Promise.resolve(e.detail.data).then((text) => (typeof text === "string" ? clean(text) : ""));
     });
     const [rights, encryption] = await Promise.all([
       book.loadText("META-INF/rights.xml"),
@@ -317,6 +331,7 @@ async function openEpub(session) {
     session.observer.observe(host);
   } catch (err) {
     console.error("epub open failed", err);
+    failed.add(session.id); // the shelf tile says Can't preview
     if (cur !== session) return;
     dropView(session);
     $("epub-flow").hidden = true;
@@ -375,7 +390,7 @@ function onRelocate(session, detail) {
     kind: "epub",
     cfi,
     fraction: Math.min(1, Math.max(0, fraction)),
-    chapter: detail.tocItem?.label?.trim().slice(0, 200) || null,
+    chapter: detail.tocItem?.label?.trim() || null,
     atEnd: session.view.renderer.atEnd === true,
   };
   clearTimeout(session.timer);
@@ -394,7 +409,7 @@ function changeEpub(patch) {
   markLayout(next.layout);
   applyStyles(session);
   if (layoutChanged) session.view.renderer.setAttribute("flow", next.layout === "scrolled" ? "scrolled" : "paginated");
-  invoke("set_epub_settings", { fontSize: next.fontSize, layout: next.layout })
+  enqueue(session, () => invoke("set_epub_settings", { fontSize: next.fontSize, layout: next.layout }))
     .then(() => session.onEpubSettings?.(next.fontSize, next.layout))
     .catch((err) => console.error("set_epub_settings failed", err));
   if (cfi) session.view.goTo(cfi);
@@ -499,7 +514,7 @@ export function openReader({ book, path, position, theme, onExit, onTheme, epub,
   markTheme(theme);
   $("reader-view").hidden = false;
   if (isEpub) {
-    Object.assign(cur, { fileName: book.fileName, epub: { fontSize: 100, layout: "paginated", ...epub }, onEpubSettings, ready: false });
+    Object.assign(cur, { fileName: book.fileName, epub, onEpubSettings, ready: false });
     markLayout(cur.epub.layout);
     openEpub(cur);
   } else {

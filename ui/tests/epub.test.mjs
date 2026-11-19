@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { columnCount, stepFontSize, themeStyles, isExternalHref, blockScripts, SCRIPT_CSP } from "../lib/epub.js";
+import { columnCount, stepFontSize, themeStyles, isExternalHref, allowResource, stripRemoteCss, PAGE_CSP } from "../lib/epub.js";
 
 test("columnCount: exactly 1000 px is one column, 1001 px is two", () => {
   // Catches >= instead of > (the spec says "wider than 1000").
@@ -72,25 +72,54 @@ test("isExternalHref: everything else is refused", () => {
   }
 });
 
-test("blockScripts: puts a script-src 'none' CSP first in the head", () => {
-  // Catches a book page reaching the frame without the meta CSP (its scripts would run).
-  const out = blockScripts('<html xmlns="http://www.w3.org/1999/xhtml"><head><title>t</title><script>x()</script></head><body/></html>');
-  assert.equal(out, `<html xmlns="http://www.w3.org/1999/xhtml"><head>${SCRIPT_CSP}<title>t</title><script>x()</script></head><body/></html>`);
+test("allowResource: canonical document, style, image, font, audio and video types pass", () => {
+  for (const type of ["application/xhtml+xml", "text/html", "image/svg+xml", "text/css", "image/png", "image/jpeg", "font/woff2", "audio/mpeg", "video/mp4",
+    "application/font-woff", "application/x-font-ttf", "application/x-font-otf", "application/vnd.ms-opentype", "application/font-sfnt"]) {
+    assert.equal(allowResource(type), true, type);
+  }
 });
 
-test("blockScripts: a head with attributes, any case", () => {
-  assert.equal(blockScripts('<HTML><HEAD lang="en"></HEAD></HTML>'), `<HTML><HEAD lang="en">${SCRIPT_CSP}</HEAD></HTML>`);
+test("allowResource: scripts and unknown XML types are refused", () => {
+  // Catches text/xml or application/xml pages being served raw (no sanitize pass, no CSP).
+  for (const type of ["text/xml", "application/xml", "application/javascript", "text/javascript", "application/x-javascript", "application/octet-stream", "", undefined, null]) {
+    assert.equal(allowResource(type), false, String(type));
+  }
 });
 
-test("blockScripts: no head gets one after <html>, and <header> is not taken for <head>", () => {
-  // Catches the meta landing inside <header> in the body, where browsers ignore it.
-  assert.equal(blockScripts("<html><body><header>h</header></body></html>"),
-    `<html><head>${SCRIPT_CSP}</head><body><header>h</header></body></html>`);
+test("allowResource: a document type not in exact lowercase canonical form is refused", () => {
+  // Foliate only rewrites the exact strings, so these would reach the iframe raw.
+  for (const type of ["Application/XHTML+XML", "text/html; charset=utf-8", "TEXT/HTML", "image/svg+xml; charset=utf-8", "Text/CSS"]) {
+    assert.equal(allowResource(type), false, type);
+  }
 });
 
-test("blockScripts: an SVG page (no html element) loses its scripts and on* handlers", () => {
-  // Catches an SVG spine page slipping past: it has no head to put the CSP in.
-  assert.equal(
-    blockScripts(`<svg xmlns="http://www.w3.org/2000/svg" onload="x()"><script>x()</script><script href="a.js"/><rect onclick='y()'/></svg>`),
-    '<svg xmlns="http://www.w3.org/2000/svg"><rect/></svg>');
+test("allowResource: image and font prefixes are case-insensitive", () => {
+  assert.equal(allowResource("Image/PNG"), true);
+  assert.equal(allowResource("FONT/WOFF2"), true);
+});
+
+test("stripRemoteCss: remote url() becomes url(\"\")", () => {
+  assert.equal(stripRemoteCss("a{background:url(http://x/a.png)}"), 'a{background:url("")}');
+  assert.equal(stripRemoteCss("a{background:url('https://x')}"), 'a{background:url("")}');
+  assert.equal(stripRemoteCss('a{background:url( "//x/a.png" )}'), 'a{background:url("")}');
+});
+
+test("stripRemoteCss: blob and data urls are kept", () => {
+  const css = "a{background:url(blob:null/1234)} b{background:url(data:image/png;base64,AAAA)}";
+  assert.equal(stripRemoteCss(css), css);
+});
+
+test("stripRemoteCss: remote @import is removed, any form", () => {
+  assert.equal(stripRemoteCss('@import "https://x/a.css";p{}'), "p{}");
+  assert.equal(stripRemoteCss("@import url(//x/a.css);p{}"), "p{}");
+  assert.equal(stripRemoteCss("@import url('http://x/a.css') screen;p{}"), "p{}");
+});
+
+test("stripRemoteCss: a local @import stays", () => {
+  assert.equal(stripRemoteCss('@import "blob:null/1";p{}'), '@import "blob:null/1";p{}');
+});
+
+test("PAGE_CSP: denies everything by default and names no script source", () => {
+  assert.ok(PAGE_CSP.startsWith("default-src 'none';"));
+  assert.ok(!PAGE_CSP.includes("script-src"));
 });
