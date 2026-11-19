@@ -146,15 +146,17 @@ The screen turns every `path` and `coverPath` into a URL with `window.__TAURI__.
 | all stored dates | current time | Rust `SystemTime::now()` as UTC ISO 8601 |
 | corrupt file name | timestamp | Rust, UTC, formatted `YYYYMMDD-HHMMSS` (no `:` which Windows file names forbid) |
 
-**Palette** (monochrome, no pure black or pure white):
+**Palette** (neutral monochrome, no pure black or pure white; changed from the first warm values on 2026-11-19 at the owner's request):
 
 | Token | Paper | Night |
 |---|---|---|
-| background | `#F4F1EA` | `#1E1E1E` |
-| surface (cards) | `#ECE8DF` | `#262626` |
-| text | `#2B2A28` | `#D8D5CF` |
-| muted text | `#625E58` | `#9A968F` |
-| lines | `#DDD8CD` | `#363636` |
+| background | `#F5F5F5` | `#141414` |
+| surface (cards) | `#EBEBEB` | `#1C1C1C` |
+| text | `#1A1A1A` | `#DCDCDC` |
+| muted text | `#5C5C5C` | `#959595` |
+| lines | `#D4D4D4` | `#2E2E2E` |
+
+Shape: square corners everywhere, flat solid 1px lines, no shadows, generous white space around the shelf and panels.
 
 Typeface: the Windows system font (`Segoe UI`, via `system-ui`); no font files shipped. Page recoloring uses the PDF.js options in the reader mechanism above. They also turn images into two tones, which is accepted. If the pinned version does not honor them for normal PDFs, fall back to a CSS filter on the viewer's page container (Paper: light sepia; Night: invert plus hue rotate). Original applies no recoloring. The main window starts hidden with its `backgroundColor` set to the theme background, and is shown once the first screen has painted.
 
