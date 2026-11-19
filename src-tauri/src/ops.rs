@@ -207,6 +207,11 @@ pub fn set_page_theme(store: &mut Store, theme: &str) -> Result<(), String> {
     Ok(())
 }
 
+pub fn set_dim_desktop(store: &mut Store, on: bool) {
+    store.lib.settings.dim_desktop = on;
+    store.persist();
+}
+
 pub fn set_epub_settings(store: &mut Store, font_size: i64, layout: &str) -> Result<(), String> {
     let size = u32::try_from(font_size).ok().filter(|n| EPUB_FONT_SIZES.contains(n));
     let (Some(size), Some(layout)) = (size, EpubLayout::parse(layout)) else {
@@ -752,6 +757,18 @@ mod tests {
         assert_eq!(set_page_theme(&mut s, "sepia"), Err("bad_theme".into()));
         assert_eq!(set_page_theme(&mut s, "Night"), Err("bad_theme".into()));
         assert_eq!(s.lib.settings.page_theme, PageTheme::Night);
+    }
+
+    #[test]
+    fn dim_desktop_is_stored_and_saved() {
+        let (d, mut s) = fixture();
+        assert!(!s.lib.settings.dim_desktop);
+        set_dim_desktop(&mut s, true);
+        assert!(s.lib.settings.dim_desktop);
+        let (back, _) = crate::library::load(d.path(), t(0));
+        assert!(back.settings.dim_desktop);
+        set_dim_desktop(&mut s, false);
+        assert!(!s.lib.settings.dim_desktop);
     }
 
     #[test]

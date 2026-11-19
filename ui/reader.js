@@ -23,6 +23,11 @@ function cssColor(name) {
   return getComputedStyle(document.documentElement).getPropertyValue(`--${name}`).trim();
 }
 
+// Dims the desktop around the window; errors are logged, never shown.
+function applyDim(on) {
+  return invoke("dim_desktop", { on }).catch((err) => console.error("dim_desktop failed", err));
+}
+
 function viewerUrl(position) {
   if (!position) return VIEWER;
   const { page, zoom, left, top } = position;
@@ -201,6 +206,7 @@ async function back() {
   const session = cur;
   if (!session || session.exiting) return;
   session.exiting = true;
+  applyDim(false);
   await flush(session);
   if (session.format === "epub") closeEpub(session);
   else endHighlights(session);
@@ -508,14 +514,16 @@ function closeEpub(session) {
   $("viewer-host").style.background = "";
 }
 
-export function openReader({ book, path, position, theme, onExit, onTheme, epub, onEpubSettings }) {
+export function openReader({ book, path, position, theme, dim, onDim, onExit, onTheme, epub, onEpubSettings }) {
   const isEpub = book.format === "epub";
-  cur = { id: book.id, path, position, theme, onExit, onTheme, queue: Promise.resolve(), exiting: false, format: isEpub ? "epub" : "pdf" };
+  cur = { id: book.id, path, position, theme, onDim, onExit, onTheme, queue: Promise.resolve(), exiting: false, format: isEpub ? "epub" : "pdf" };
   $("hl-toggle").hidden = isEpub;
   $("toc-toggle").hidden = !isEpub;
   $("epub-flow").hidden = !isEpub;
   $("reader-title").textContent = book.displayTitle;
   markTheme(theme);
+  $("dim-toggle").setAttribute("aria-pressed", String(dim === true));
+  if (dim === true) applyDim(true);
   $("reader-view").hidden = false;
   if (isEpub) {
     Object.assign(cur, { fileName: book.fileName, epub, onEpubSettings, ready: false });
@@ -530,6 +538,24 @@ export function openReader({ book, path, position, theme, onExit, onTheme, epub,
 initHighlights({ current: () => cur, enqueue });
 
 $("reader-back").addEventListener("click", back);
+$("dim-toggle").addEventListener("click", async (e) => {
+  dropFocus(e);
+  const session = cur;
+  if (!session || session.exiting) return;
+  const on = $("dim-toggle").getAttribute("aria-pressed") !== "true";
+  try {
+    await invoke("set_dim_desktop", { on });
+  } catch (err) {
+    console.error("set_dim_desktop failed", err);
+    return;
+  }
+  session.onDim(on);
+  if (cur !== session) {
+    if (on) applyDim(false); // the book was closed while this was saving
+    return;
+  }
+  $("dim-toggle").setAttribute("aria-pressed", String(on));
+});
 for (const button of document.querySelectorAll("[data-theme-choice]")) {
   button.addEventListener("click", (e) => {
     dropFocus(e);
@@ -539,7 +565,10 @@ for (const button of document.querySelectorAll("[data-theme-choice]")) {
 
 getCurrentWindow()
   .onCloseRequested(async () => {
-    if (cur) await flush(cur);
+    if (cur) {
+      await applyDim(false);
+      await flush(cur);
+    }
   })
   .catch((err) => console.error("close handler not set", err));
 

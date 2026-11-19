@@ -11,7 +11,10 @@
   <div id="shelf-view">
     <header class="header">
       <h1>ReaderX</h1>
-      <button id="change-folder" class="btn" type="button" hidden>Change folder</button>
+      <div class="header-actions">
+        <button id="theme-toggle" class="btn icon-btn" type="button"></button>
+        <button id="change-folder" class="btn" type="button" hidden>Change folder</button>
+      </div>
     </header>
     <div id="notice" class="notice" role="status" hidden>
       <span id="notice-text"></span>
@@ -25,6 +28,7 @@
       <button id="reader-back" class="btn" type="button">&larr; Back</button>
       <div id="reader-title" class="reader-title"></div>
       <button id="hl-toggle" class="btn" type="button" aria-expanded="false" aria-controls="hl-panel">Highlights (0)</button>
+      <button id="dim-toggle" class="btn" type="button" aria-pressed="false">Dim</button>
       <button id="toc-toggle" class="btn" type="button" aria-expanded="false" aria-controls="toc-panel" hidden>Contents</button>
       <div id="epub-flow" class="epub-flow" hidden>
         <button id="epub-smaller" class="btn" type="button" aria-label="Smaller text">A&minus;</button>

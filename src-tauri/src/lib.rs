@@ -13,8 +13,12 @@ use library::{lock, Position, Store};
 use serde::Serialize;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::Sender;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
-use tauri::{AppHandle, Emitter, Manager, State};
+use tauri::{
+    AppHandle, Emitter, Manager, PhysicalPosition, PhysicalSize, State, WebviewUrl, WebviewWindow,
+    WebviewWindowBuilder, WindowEvent,
+};
 
 struct Shared(Mutex<Store>);
 
@@ -54,6 +58,107 @@ fn restart_watch(app: &AppHandle, folder: &str) {
 fn allow_dir(app: &AppHandle, dir: &Path) {
     if let Err(e) = app.asset_protocol_scope().allow_directory(dir, true) {
         eprintln!("readerx: asset scope for {}: {e}", dir.display());
+    }
+}
+
+/// Whether the desktop should be dark right now (a book is open and the
+/// setting is on). Not saved; the reader drives it with `dim_desktop`.
+struct DimWanted(AtomicBool);
+
+fn win_err(what: &str, e: impl std::fmt::Display) -> String {
+    eprintln!("readerx: dim {what}: {e}");
+    "dim_failed".to_string()
+}
+
+/// The overlay, built hidden and click-through the first time it is needed.
+fn dim_window(app: &AppHandle) -> Result<WebviewWindow, String> {
+    if let Some(w) = app.get_webview_window("dim") {
+        return Ok(w);
+    }
+    let w = WebviewWindowBuilder::new(app, "dim", WebviewUrl::App("dim.html".into()))
+        .transparent(true)
+        .decorations(false)
+        .skip_taskbar(true)
+        .resizable(false)
+        .shadow(false)
+        .focused(false)
+        .always_on_top(false)
+        .visible(false)
+        .build()
+        .map_err(|e| win_err("build", e))?;
+    w.set_ignore_cursor_events(true).map_err(|e| win_err("click-through", e))?;
+    Ok(w)
+}
+
+/// Cover the monitor the main window is on.
+fn place_dim(dim: &WebviewWindow, main: &WebviewWindow) -> Result<(), String> {
+    if let Some(m) = main.current_monitor().map_err(|e| win_err("monitor", e))? {
+        let (p, z) = (m.position(), m.size());
+        dim.set_position(PhysicalPosition::new(p.x, p.y)).map_err(|e| win_err("position", e))?;
+        dim.set_size(PhysicalSize::new(z.width, z.height)).map_err(|e| win_err("size", e))?;
+    }
+    Ok(())
+}
+
+fn show_dim(app: &AppHandle) -> Result<(), String> {
+    let Some(main) = app.get_webview_window("main") else { return Ok(()) };
+    if main.is_minimized().unwrap_or(false) {
+        return Ok(());
+    }
+    let dim = dim_window(app)?;
+    let was_hidden = !dim.is_visible().unwrap_or(false);
+    if was_hidden {
+        place_dim(&dim, &main)?;
+        dim.show().map_err(|e| win_err("show", e))?;
+        // Only after our own show, so the reader stays above the overlay and
+        // its focus event cannot start a loop.
+        main.set_focus().map_err(|e| win_err("focus", e))?;
+    }
+    Ok(())
+}
+
+fn hide_dim(app: &AppHandle) -> Result<(), String> {
+    match app.get_webview_window("dim") {
+        Some(d) => d.hide().map_err(|e| win_err("hide", e)),
+        None => Ok(()),
+    }
+}
+
+/// Apply without saving: remember what is wanted, then show or hide.
+fn apply_dim(app: &AppHandle, on: bool) -> Result<(), String> {
+    app.state::<DimWanted>().0.store(on, Ordering::SeqCst);
+    if on { show_dim(app) } else { hide_dim(app) }
+}
+
+/// Keep the overlay in step with the main window.
+fn follow_main(app: &AppHandle, event: &WindowEvent) {
+    let wanted = app.state::<DimWanted>().0.load(Ordering::SeqCst);
+    let result = match event {
+        WindowEvent::CloseRequested { .. } | WindowEvent::Destroyed => {
+            app.state::<DimWanted>().0.store(false, Ordering::SeqCst);
+            match app.get_webview_window("dim") {
+                Some(d) => d.destroy().map_err(|e| win_err("close", e)),
+                None => Ok(()),
+            }
+        }
+        WindowEvent::Resized(_) | WindowEvent::Focused(true) if wanted => {
+            let minimized = app
+                .get_webview_window("main")
+                .and_then(|m| m.is_minimized().ok())
+                .unwrap_or(false);
+            if minimized { hide_dim(app) } else { show_dim(app) }
+        }
+        WindowEvent::Moved(_) if wanted => {
+            // dragged to another monitor: follow it
+            match (app.get_webview_window("dim"), app.get_webview_window("main")) {
+                (Some(d), Some(m)) if d.is_visible().unwrap_or(false) => place_dim(&d, &m),
+                _ => Ok(()),
+            }
+        }
+        _ => Ok(()),
+    };
+    if let Err(e) = result {
+        eprintln!("readerx: dim follow: {e}");
     }
 }
 
@@ -119,6 +224,17 @@ fn set_finished(state: State<Shared>, id: String, finished: bool) -> Result<Book
 #[tauri::command(async)]
 fn set_page_theme(state: State<Shared>, theme: String) -> Result<(), String> {
     ops::set_page_theme(&mut lock(&state.0), &theme)
+}
+
+#[tauri::command(async)]
+fn set_dim_desktop(app: AppHandle, state: State<Shared>, on: bool) -> Result<(), String> {
+    ops::set_dim_desktop(&mut lock(&state.0), on);
+    apply_dim(&app, on)
+}
+
+#[tauri::command(async)]
+fn dim_desktop(app: AppHandle, on: bool) -> Result<(), String> {
+    apply_dim(&app, on)
 }
 
 #[tauri::command(async)]
@@ -261,6 +377,7 @@ pub fn run() {
         .plugin(
             // VISIBLE excluded: the window starts hidden and the screen shows it after first paint
             tauri_plugin_window_state::Builder::default()
+                .with_denylist(&["dim"])
                 .with_state_flags(
                     tauri_plugin_window_state::StateFlags::all()
                         - tauri_plugin_window_state::StateFlags::VISIBLE,
@@ -291,6 +408,11 @@ pub fn run() {
                 }
             })));
             app.manage(WatchSlot(Mutex::new(None)));
+            app.manage(DimWanted(AtomicBool::new(false)));
+            if let Some(main) = app.get_webview_window("main") {
+                let h = app.handle().clone();
+                main.on_window_event(move |e| follow_main(&h, e));
+            }
             if let Some(folder) = &folder {
                 restart_watch(app.handle(), folder);
             }
@@ -307,6 +429,8 @@ pub fn run() {
             set_finished,
             set_page_theme,
             set_epub_settings,
+            set_dim_desktop,
+            dim_desktop,
             get_highlights,
             add_highlights,
             set_note,
