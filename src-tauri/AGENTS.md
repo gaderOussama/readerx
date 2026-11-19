@@ -19,7 +19,7 @@ Owns everything that touches the disk: the library file, book ids, the folder sc
 ## Conventions
 
 - New command: logic in `ops.rs` with a unit test, a thin wrapper in `lib.rs`, and an `allow-*` entry in `capabilities/default.json`.
-- Errors cross to the screen as short snake case codes (`unknown_book`, `bad_position`, `bad_image`, `not_a_folder`, `not_present`, `bad_theme`, `cover_write_failed`), never as prose.
+- Errors cross to the screen as short snake case codes (`unknown_book`, `bad_position`, `bad_image`, `not_a_folder`, `not_present`, `bad_theme`, `cover_write_failed`, `dim_failed`), never as prose.
 - Take the store with `library::lock`; never hold it while walking or hashing files (`scan::run` snapshots, works unlocked, then merges).
 - Tests use `tempfile` folders and fixed timestamps, never the real AppData or the real watcher.
 

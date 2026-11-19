@@ -73,6 +73,9 @@ pub struct Settings {
     pub epub_font_size: u32,
     #[serde(default = "default_epub_layout")]
     pub epub_layout: EpubLayout,
+    /// Focus mode: a dark overlay covers the desktop behind the reader.
+    #[serde(default)]
+    pub dim_desktop: bool,
 }
 
 impl Default for Settings {
@@ -85,6 +88,7 @@ impl Default for Settings {
             export_errors: BTreeMap::new(),
             epub_font_size: default_epub_font_size(),
             epub_layout: default_epub_layout(),
+            dim_desktop: false,
         }
     }
 }
@@ -495,6 +499,7 @@ mod tests {
         assert!(notice.is_none());
         assert_eq!(lib.settings.epub_font_size, 100);
         assert_eq!(lib.settings.epub_layout, EpubLayout::Paginated);
+        assert!(!lib.settings.dim_desktop);
         let b = &lib.books[&id];
         assert_eq!(b.meta_author, None);
         assert!(!b.cover_checked);

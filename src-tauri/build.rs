@@ -12,6 +12,8 @@ fn main() {
         "set_finished",
         "set_page_theme",
         "set_epub_settings",
+        "set_dim_desktop",
+        "dim_desktop",
         "get_highlights",
         "add_highlights",
         "set_note",

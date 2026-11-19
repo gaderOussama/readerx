@@ -21,6 +21,8 @@
     "allow-set-finished",
     "allow-set-page-theme",
     "allow-set-epub-settings",
+    "allow-set-dim-desktop",
+    "allow-dim-desktop",
     "allow-get-highlights",
     "allow-add-highlights",
     "allow-set-note",
