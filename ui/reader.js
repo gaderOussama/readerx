@@ -1,4 +1,5 @@
 import { initHighlights, startHighlights, attachHighlights, highlightKey, flushNotes, endHighlights, closePanelIfOpen } from "./highlights.js";
+import { closeToc, tocIsOpen } from "./toc.js";
 import { columnCount, stepFontSize, themeStyles, isExternalHref } from "./lib/epub.js";
 import { isProtected } from "./lib/epub-meta.js";
 
@@ -407,11 +408,8 @@ function onEpubKey(e) {
   if (isTyping(e) && key !== "Escape") return;
   if (key === "Escape") {
     e.preventDefault();
-    const panel = $("toc-panel");
-    if (panel && !panel.hidden) {
-      panel.hidden = true;
-      $("toc-toggle").setAttribute("aria-expanded", "false");
-    } else back();
+    if (tocIsOpen()) closeToc();
+    else back();
     return;
   }
   const view = session.view;
@@ -476,6 +474,7 @@ function dropView(session) {
 
 function closeEpub(session) {
   clearTimeout(session.timer);
+  closeToc();
   dropView(session);
   document.removeEventListener("keydown", onEpubKey, true);
   for (const type of ["contextmenu", "dragover", "drop"]) document.removeEventListener(type, stopDefault);

@@ -49,6 +49,21 @@
       </div>
       <div id="hl-export" class="hl-export"></div>
     </aside>
+    <aside id="toc-panel" class="hl-panel" aria-label="Contents" hidden>
+      <div class="theme-toggle toc-tabs" role="group" aria-label="Panel section">
+        <button type="button" data-toc-tab="contents" aria-pressed="true">Contents</button>
+        <button type="button" data-toc-tab="search" aria-pressed="false">Search</button>
+      </div>
+      <div id="toc-contents" class="hl-scroll">
+        <p id="toc-none" class="hl-empty" hidden>This book has no table of contents.</p>
+        <ul id="toc-list" class="toc-list"></ul>
+      </div>
+      <div id="toc-search" class="hl-scroll" hidden>
+        <input id="toc-query" class="toc-query" type="text" placeholder="Search in book" aria-label="Search in book" autocomplete="off" spellcheck="false">
+        <p id="toc-status" class="hl-empty" role="status"></p>
+        <ul id="toc-results" class="toc-list"></ul>
+      </div>
+    </aside>
     <div id="hl-bar"class="hl-bar" role="status" hidden>
       <span id="hl-bar-text"></span>
       <button id="hl-undo" class="hl-undo" type="button" hidden>Undo</button>
