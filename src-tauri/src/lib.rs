@@ -91,10 +91,8 @@ fn save_position(
     id: String,
     position: Position,
     page_count: Option<i64>,
-    at_end: Option<bool>,
 ) -> Result<ops::Saved, String> {
-    let at_end = at_end.unwrap_or(false);
-    ops::save_position(&mut lock(&state.0), &id, position, page_count, at_end, Utc::now())
+    ops::save_position(&mut lock(&state.0), &id, position, page_count, Utc::now())
 }
 
 #[tauri::command(async)]
@@ -128,11 +126,6 @@ fn set_epub_settings(state: State<Shared>, font_size: i64, layout: String) -> Re
     ops::set_epub_settings(&mut lock(&state.0), font_size, &layout)
 }
 
-/// The book's data folder and page count, or `unknown_book` / `not_supported`.
-fn book_dir(state: &State<Shared>, id: &str) -> Result<(PathBuf, Option<u32>), String> {
-    ops::highlight_book(&lock(&state.0), id)
-}
-
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct HighlightsOut {
@@ -160,7 +153,7 @@ fn get_highlights(
     exporter: State<Exporter>,
     id: String,
 ) -> Result<HighlightsOut, String> {
-    let (dir, pages) = book_dir(&state, &id)?;
+    let (dir, pages) = ops::highlight_book(&lock(&state.0), &id)?;
     let (export_folder, export_error) = {
         let s = lock(&state.0);
         (s.lib.settings.export_folder.clone(), s.lib.settings.export_errors.get(&id).cloned())
@@ -185,7 +178,7 @@ fn add_highlights(
     id: String,
     items: Vec<Item>,
 ) -> Result<HighlightList, String> {
-    let (dir, pages) = book_dir(&state, &id)?;
+    let (dir, pages) = ops::highlight_book(&lock(&state.0), &id)?;
     let highlights = highlights::add(&Ctx::new(&dir, &id, pages)?, &books, items, Utc::now())?;
     exporter.queue(&id);
     Ok(HighlightList { highlights })
@@ -200,7 +193,7 @@ fn set_note(
     highlight_id: String,
     note: String,
 ) -> Result<HighlightList, String> {
-    let (dir, pages) = book_dir(&state, &id)?;
+    let (dir, pages) = ops::highlight_book(&lock(&state.0), &id)?;
     let ctx = Ctx::new(&dir, &id, pages)?;
     let highlights = highlights::set_note(&ctx, &books, &highlight_id, &note, Utc::now())?;
     exporter.queue(&id);
@@ -215,7 +208,7 @@ fn delete_highlight(
     id: String,
     highlight_id: String,
 ) -> Result<HighlightList, String> {
-    let (dir, pages) = book_dir(&state, &id)?;
+    let (dir, pages) = ops::highlight_book(&lock(&state.0), &id)?;
     let ctx = Ctx::new(&dir, &id, pages)?;
     let highlights = highlights::delete(&ctx, &books, &highlight_id, Utc::now())?;
     exporter.queue(&id);
@@ -229,7 +222,7 @@ fn restore_highlight(
     exporter: State<Exporter>,
     id: String,
 ) -> Result<HighlightList, String> {
-    let (dir, pages) = book_dir(&state, &id)?;
+    let (dir, pages) = ops::highlight_book(&lock(&state.0), &id)?;
     let highlights = highlights::restore(&Ctx::new(&dir, &id, pages)?, &books, Utc::now())?;
     exporter.queue(&id);
     Ok(HighlightList { highlights })

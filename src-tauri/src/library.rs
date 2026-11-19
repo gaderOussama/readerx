@@ -115,6 +115,9 @@ pub struct EpubPosition {
     pub fraction: f64,
     /// The table of contents label at the spot.
     pub chapter: Option<String>,
+    /// The reader was on the last page (Scroll mode reports it a screen early).
+    #[serde(default)]
+    pub at_end: bool,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
@@ -507,6 +510,7 @@ mod tests {
             cfi: "epubcfi(/6/4!/4/2)".into(),
             fraction: 0.5,
             chapter: Some("Two".into()),
+            at_end: false,
         }));
         lib.books.insert(b.id.clone(), b.clone());
         save(d.path(), &lib).unwrap();

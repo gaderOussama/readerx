@@ -95,14 +95,12 @@ fn validate_epub_position(p: &mut EpubPosition) -> Result<(), String> {
     Ok(())
 }
 
-/// `page_count` is required for a PDF position and ignored for an EPUB one;
-/// `at_end` is only read for an EPUB (a PDF position carries its own flag).
+/// `page_count` is required for a PDF position and ignored for an EPUB one.
 pub fn save_position(
     store: &mut Store,
     id: &str,
     mut position: Position,
     page_count: Option<i64>,
-    at_end: bool,
     now: DateTime<Utc>,
 ) -> Result<Saved, String> {
     let Some(book) = store.lib.books.get_mut(id) else {
@@ -122,11 +120,9 @@ pub fn save_position(
         }
         (Position::Epub(p), Format::Epub) => {
             validate_epub_position(p)?;
-            let was = matches!(
-                &book.position,
-                Some(Position::Epub(q)) if q.fraction >= EPUB_FINISHED_FRACTION
-            );
-            (p.fraction, at_end || p.fraction >= EPUB_FINISHED_FRACTION, was)
+            let end = |q: &EpubPosition| q.at_end || q.fraction >= EPUB_FINISHED_FRACTION;
+            let was = matches!(&book.position, Some(Position::Epub(q)) if end(q));
+            (p.fraction, end(p), was)
         }
         _ => return err("bad_position"),
     };
@@ -140,7 +136,8 @@ pub fn save_position(
     Ok(saved)
 }
 
-/// `page_count` is null for an EPUB. Always marks the cover as checked.
+/// `page_count` is null for an EPUB. Marks an EPUB's cover as checked (a PDF's
+/// cover is checked once `save_cover` has run).
 pub fn set_meta(
     store: &mut Store,
     id: &str,
@@ -157,7 +154,9 @@ pub fn set_meta(
     if let Some(n) = page_count.and_then(|n| u32::try_from(n).ok()).filter(|&n| n >= 1) {
         book.page_count = Some(n);
     }
-    book.cover_checked = true;
+    if book.format == Format::Epub {
+        book.cover_checked = true;
+    }
     store.persist();
     Ok(())
 }
@@ -306,19 +305,25 @@ mod tests {
             cfi: cfi.into(),
             fraction,
             chapter: chapter.map(String::from),
+            at_end: false,
         })
+    }
+
+    fn at_end(fraction: f64) -> Position {
+        let Position::Epub(p) = at(fraction) else { unreachable!() };
+        Position::Epub(EpubPosition { at_end: true, ..p })
     }
 
     fn at(fraction: f64) -> Position {
         epos("epubcfi(/6/4!/4/2)", fraction, None)
     }
 
-    fn save_epub(s: &mut Store, p: Position, at_end: bool) -> Result<Saved, String> {
-        save_position(s, &epub_id(), p, None, at_end, t(30))
+    fn save_epub(s: &mut Store, p: Position) -> Result<Saved, String> {
+        save_position(s, &epub_id(), p, None, t(30))
     }
 
     fn save(s: &mut Store, p: Position, count: i64) -> Result<Saved, String> {
-        save_position(s, &id(), p, Some(count), false, t(30))
+        save_position(s, &id(), p, Some(count), t(30))
     }
 
     fn finished_at(s: &Store) -> Option<String> {
@@ -423,8 +428,8 @@ mod tests {
         save(&mut s, pos(379, false), 380).unwrap();
         save(&mut s, pos(380, false), 380).unwrap();
         let first = finished_at(&s);
-        save_position(&mut s, &id(), pos(1, false), Some(380), false, t(55)).unwrap();
-        save_position(&mut s, &id(), pos(380, false), Some(380), false, t(58)).unwrap();
+        save_position(&mut s, &id(), pos(1, false), Some(380), t(55)).unwrap();
+        save_position(&mut s, &id(), pos(380, false), Some(380), t(58)).unwrap();
         assert_eq!(finished_at(&s), first);
     }
 
@@ -482,7 +487,7 @@ mod tests {
         let nope = format!("{}-1", "c".repeat(64));
         assert_eq!(open_book(&mut s, &nope, t(1)), Err("unknown_book".into()));
         assert_eq!(
-            save_position(&mut s, &nope, pos(1, false), Some(10), false, t(1)),
+            save_position(&mut s, &nope, pos(1, false), Some(10), t(1)),
             Err("unknown_book".into())
         );
         assert_eq!(set_meta(&mut s, &nope, None, None, Some(3)), Err("unknown_book".into()));
@@ -524,7 +529,7 @@ mod tests {
     fn epub_position_saves_and_progress_equals_fraction() {
         let (_d, mut s) = fixture();
         let p = epos("epubcfi(/6/4!/4/2)", 0.34, Some("Chapter 3"));
-        let r = save_epub(&mut s, p.clone(), false).unwrap();
+        let r = save_epub(&mut s, p.clone()).unwrap();
         assert_eq!(r, Saved { progress: 0.34, finished_at: None });
         let b = &s.lib.books[&epub_id()];
         assert_eq!(b.position, Some(p));
@@ -548,7 +553,7 @@ mod tests {
             epos("epubcfi(/6/4)", f64::INFINITY, None),
         ];
         for p in cases {
-            assert_eq!(save_epub(&mut s, p.clone(), false), Err("bad_position".into()), "{p:?}");
+            assert_eq!(save_epub(&mut s, p.clone()), Err("bad_position".into()), "{p:?}");
         }
         assert_eq!(s.lib, before);
     }
@@ -558,8 +563,8 @@ mod tests {
         let (_d, mut s) = fixture();
         let edge = format!("epubcfi({}", "1".repeat(2000 - "epubcfi(".len()));
         assert_eq!(edge.chars().count(), 2000);
-        assert!(save_epub(&mut s, epos(&edge, 0.0, None), false).is_ok());
-        assert!(save_epub(&mut s, epos(&edge, 1.0, None), false).is_ok());
+        assert!(save_epub(&mut s, epos(&edge, 0.0, None)).is_ok());
+        assert!(save_epub(&mut s, epos(&edge, 1.0, None)).is_ok());
     }
 
     #[test]
@@ -569,11 +574,11 @@ mod tests {
             Some(Position::Epub(p)) => p.chapter.clone(),
             other => panic!("{other:?}"),
         };
-        save_epub(&mut s, epos("epubcfi(/6/4)", 0.5, Some("  Chapter 3  ")), false).unwrap();
+        save_epub(&mut s, epos("epubcfi(/6/4)", 0.5, Some("  Chapter 3  "))).unwrap();
         assert_eq!(chapter(&s).as_deref(), Some("Chapter 3"));
-        save_epub(&mut s, epos("epubcfi(/6/4)", 0.5, Some(&"é".repeat(250))), false).unwrap();
+        save_epub(&mut s, epos("epubcfi(/6/4)", 0.5, Some(&"é".repeat(250)))).unwrap();
         assert_eq!(chapter(&s), Some("é".repeat(200)));
-        save_epub(&mut s, epos("epubcfi(/6/4)", 0.5, Some("   ")), false).unwrap();
+        save_epub(&mut s, epos("epubcfi(/6/4)", 0.5, Some("   "))).unwrap();
         assert_eq!(chapter(&s), None);
     }
 
@@ -582,12 +587,12 @@ mod tests {
         let (_d, mut s) = fixture();
         let before = s.lib.clone();
         assert_eq!(
-            save_position(&mut s, &epub_id(), pos(1, false), Some(10), false, t(30)),
+            save_position(&mut s, &epub_id(), pos(1, false), Some(10), t(30)),
             Err("bad_position".into()),
             "pdf position on an epub book"
         );
         assert_eq!(
-            save_position(&mut s, &id(), at(0.5), Some(10), false, t(30)),
+            save_position(&mut s, &id(), at(0.5), Some(10), t(30)),
             Err("bad_position".into()),
             "epub position on a pdf book"
         );
@@ -599,7 +604,7 @@ mod tests {
         let (_d, mut s) = fixture();
         let before = s.lib.clone();
         assert_eq!(
-            save_position(&mut s, &id(), pos(1, false), None, false, t(30)),
+            save_position(&mut s, &id(), pos(1, false), None, t(30)),
             Err("bad_position".into())
         );
         assert_eq!(s.lib, before);
@@ -608,9 +613,9 @@ mod tests {
     #[test]
     fn epub_is_finished_at_98_percent_but_not_at_97() {
         let (_d, mut s) = fixture();
-        save_epub(&mut s, at(0.97), false).unwrap();
+        save_epub(&mut s, at(0.97)).unwrap();
         assert_eq!(s.lib.books[&epub_id()].finished_at, None);
-        let r = save_epub(&mut s, at(0.98), false).unwrap();
+        let r = save_epub(&mut s, at(0.98)).unwrap();
         assert_eq!(s.lib.books[&epub_id()].finished_at, Some(iso(t(30))));
         assert_eq!(r.finished_at, Some(iso(t(30))));
     }
@@ -618,10 +623,10 @@ mod tests {
     #[test]
     fn epub_at_end_flag_finishes_at_half_way_and_a_later_save_at_10_percent_keeps_it() {
         let (_d, mut s) = fixture();
-        save_epub(&mut s, at(0.5), true).unwrap();
+        save_epub(&mut s, at_end(0.5)).unwrap();
         let first = s.lib.books[&epub_id()].finished_at.clone();
         assert!(first.is_some());
-        save_position(&mut s, &epub_id(), at(0.1), None, false, t(45)).unwrap();
+        save_position(&mut s, &epub_id(), at(0.1), None, t(45)).unwrap();
         assert_eq!(s.lib.books[&epub_id()].finished_at, first);
         assert_eq!(s.lib.books[&epub_id()].progress, 0.1);
     }
@@ -629,9 +634,9 @@ mod tests {
     #[test]
     fn epub_marked_unfinished_at_the_end_is_not_finished_again_by_the_same_spot() {
         let (_d, mut s) = fixture();
-        save_epub(&mut s, at(0.99), false).unwrap();
+        save_epub(&mut s, at(0.99)).unwrap();
         set_finished(&mut s, &epub_id(), false, t(40)).unwrap();
-        save_epub(&mut s, at(0.99), false).unwrap();
+        save_epub(&mut s, at(0.99)).unwrap();
         assert_eq!(s.lib.books[&epub_id()].finished_at, None);
     }
 
@@ -650,11 +655,28 @@ mod tests {
     }
 
     #[test]
-    fn set_meta_on_a_pdf_also_sets_cover_checked() {
+    fn set_meta_on_a_pdf_leaves_cover_checked_false() {
         let (_d, mut s) = fixture();
-        assert!(!s.lib.books[&id()].cover_checked);
         set_meta(&mut s, &id(), None, None, Some(3)).unwrap();
-        assert!(s.lib.books[&id()].cover_checked);
+        assert!(!s.lib.books[&id()].cover_checked);
+    }
+
+    #[test]
+    fn marking_unfinished_then_saving_at_end_again_does_not_refinish() {
+        let (_d, mut s) = fixture();
+        save_epub(&mut s, at_end(0.5)).unwrap();
+        assert!(s.lib.books[&epub_id()].finished_at.is_some());
+        set_finished(&mut s, &epub_id(), false, t(40)).unwrap();
+        save_epub(&mut s, at_end(0.96)).unwrap();
+        assert_eq!(s.lib.books[&epub_id()].finished_at, None);
+    }
+
+    #[test]
+    fn an_old_epub_position_without_at_end_loads() {
+        let p: Position =
+            serde_json::from_str(r#"{"kind":"epub","cfi":"epubcfi(/6/4)","fraction":0.5,"chapter":null}"#)
+                .unwrap();
+        assert!(matches!(p, Position::Epub(EpubPosition { at_end: false, .. })));
     }
 
     #[test]
