@@ -1,4 +1,5 @@
 import { needsProbe } from "./lib/covers.js";
+import { isProtected, pickString } from "./lib/epub-meta.js";
 
 const { invoke, convertFileSrc } = window.__TAURI__.core;
 
@@ -20,9 +21,69 @@ async function loadPdfjs() {
   return pdfjs;
 }
 
+// A cover image as a 240 px wide PNG blob on white, or null when it won't decode.
+// Going through <img> lets SVG covers work too.
+async function drawCover(blob) {
+  const url = URL.createObjectURL(blob);
+  try {
+    const img = new Image();
+    img.src = url;
+    await img.decode();
+    if (!img.naturalWidth || !img.naturalHeight) return null;
+    const canvas = document.createElement("canvas");
+    canvas.width = COVER_WIDTH;
+    canvas.height = Math.max(1, Math.round((img.naturalHeight * COVER_WIDTH) / img.naturalWidth));
+    const ctx = canvas.getContext("2d");
+    ctx.fillStyle = "#fff";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+    return await new Promise((done) => canvas.toBlob(done, "image/png"));
+  } catch {
+    return null;
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
+// Title, author and cover from the book's own metadata. A protected book throws, and so
+// does a timeout; neither calls set_meta, so both are tried again next launch.
+async function probeEpub(book) {
+  let epub;
+  let timer;
+  const work = (async () => {
+    const { makeBook } = await import("./vendor/foliate-js/view.js");
+    const blob = await (await fetch(convertFileSrc(book.path))).blob();
+    epub = await makeBook(new File([blob], book.fileName));
+    if (isProtected(await epub.loadText("META-INF/rights.xml"), await epub.loadText("META-INF/encryption.xml"))) {
+      throw new Error("copy protected");
+    }
+    let png = null;
+    try {
+      const cover = await epub.getCover(); // throws when the cover file is missing from the zip
+      if (cover) png = await drawCover(cover);
+    } catch {
+      // no usable cover: the title tile shows
+    }
+    return { title: pickString(epub.metadata?.title), author: pickString(epub.metadata?.author), png };
+  })();
+  work.catch(() => {}); // after a timeout its late result is ignored
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error("timeout")), TIMEOUT_MS);
+  });
+  try {
+    const { title, author, png } = await Promise.race([work, timeout]);
+    await invoke("set_meta", { id: book.id, metaTitle: title, metaAuthor: author, pageCount: null });
+    if (png) await invoke("save_cover", { id: book.id, png: new Uint8Array(await png.arrayBuffer()) });
+  } finally {
+    clearTimeout(timer);
+    epub?.destroy?.();
+  }
+}
+
 // Page 1 as a 240 px wide PNG, plus the PDF title and page count. No onPassword
 // handler is set, so a locked book rejects instead of asking.
 async function probe(book) {
+  if (book.format === "epub") return probeEpub(book);
   const lib = await loadPdfjs();
   const task = lib.getDocument({
     url: convertFileSrc(book.path),

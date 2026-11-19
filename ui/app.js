@@ -1,4 +1,4 @@
-import { relativeDay, progressText } from "./lib/format.js";
+import { relativeDay, progressText, epubProgressParts } from "./lib/format.js";
 import { h } from "./lib/dom.js";
 import { openReader } from "./reader.js";
 import { failed, probeCovers } from "./covers.js";
@@ -40,6 +40,11 @@ async function openBook(book) {
     onTheme: (theme) => {
       state.settings.pageTheme = theme;
       applyTheme(theme);
+    },
+    epub: { fontSize: state.settings.epubFontSize, layout: state.settings.epubLayout },
+    onEpubSettings: (fontSize, layout) => {
+      state.settings.epubFontSize = fontSize;
+      state.settings.epubLayout = layout;
     },
   });
 }
@@ -142,11 +147,23 @@ function cover(book) {
   return h("div", { class: "cover" }, img);
 }
 
+// An EPUB shows the chapter (cut to one line) and then the percent, which is never cut.
+function progressMeta(book) {
+  if (book.format !== "epub") {
+    const text = progressText(book);
+    return text ? h("span", { class: "meta" }, text) : null;
+  }
+  const parts = epubProgressParts(book);
+  if (!parts) return null;
+  return h("span", { class: "meta meta-line" },
+    parts.chapter ? h("span", { class: "meta-chapter" }, parts.chapter) : null,
+    h("span", { class: "meta-pct" }, parts.chapter ? ` · ${parts.percent}` : parts.percent));
+}
+
 function bookMeta(book, now) {
-  const progress = progressText(book);
   const date = book.lastOpenedAt ? relativeDay(book.lastOpenedAt, now) : null;
   return [
-    progress ? h("span", { class: "meta" }, progress) : null,
+    progressMeta(book),
     date ? h("span", { class: "meta" }, date) : null,
   ];
 }
@@ -250,12 +267,12 @@ function render() {
   const shelf = $("shelf");
   if (folderStatus === "unset") {
     shelf.replaceChildren(emptyState("Welcome to ReaderX",
-      "Choose the folder that holds your PDFs. ReaderX will keep your place in every book.",
+      "Choose the folder that holds your books. ReaderX will keep your place in every book.",
       "Choose folder"));
   } else if (folderStatus === "missing") {
     shelf.replaceChildren(emptyState("Books folder not found", settings.booksFolder, "Choose folder"));
   } else if (folderStatus === "empty") {
-    shelf.replaceChildren(emptyState(`No PDFs found in ${settings.booksFolder}`, null, "Change folder"));
+    shelf.replaceChildren(emptyState(`No PDF or EPUB books found in ${settings.booksFolder}`, null, "Change folder"));
   } else {
     const focusedKey = document.activeElement?.dataset?.key;
     shelf.replaceChildren(...shelfContent());
