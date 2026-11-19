@@ -1,5 +1,7 @@
 import { relativeDay, progressText, epubProgressParts } from "./lib/format.js";
-import { h } from "./lib/dom.js";
+import { h, s } from "./lib/dom.js";
+import { greeting, shelfSummary } from "./lib/greeting.js";
+import { bookArt } from "./lib/book-art.js";
 import { openReader } from "./reader.js";
 import { failed, probeCovers } from "./covers.js";
 
@@ -36,6 +38,10 @@ async function openBook(book) {
     path: opened.path,
     position: opened.position,
     theme: state.settings.pageTheme,
+    dim: state.settings.dimDesktop === true,
+    onDim: (on) => {
+      state.settings.dimDesktop = on;
+    },
     onExit: closeReader,
     onTheme: (theme) => {
       state.settings.pageTheme = theme;
@@ -64,6 +70,30 @@ async function closeReader() {
 
 function applyTheme(theme) {
   document.documentElement.dataset.theme = theme;
+  const dark = theme === "night";
+  const button = $("theme-toggle");
+  button.setAttribute("aria-label", dark ? "Light theme" : "Dark theme");
+  button.replaceChildren(dark ? sunIcon() : moonIcon());
+}
+
+const icon = (...parts) => s("svg", { viewBox: "0 0 24 24", width: "18", height: "18", fill: "none", stroke: "currentColor",
+  "stroke-width": "1.5", "stroke-linecap": "round", "stroke-linejoin": "round", "aria-hidden": "true", focusable: "false" }, ...parts);
+const moonIcon = () => icon(s("path", { d: "M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z" }));
+const sunIcon = () => icon(s("circle", { cx: "12", cy: "12", r: "4" }),
+  ...[0, 45, 90, 135, 180, 225, 270, 315].map((a) =>
+    s("path", { d: "M12 2.5v2.5", transform: `rotate(${a} 12 12)` })));
+
+// The same setting the reader's Original / Paper / Night toggle uses.
+async function toggleTheme() {
+  if (!state) return;
+  const theme = ["paper", "original"].includes(state.settings.pageTheme) ? "night" : "paper";
+  try {
+    await invoke("set_page_theme", { theme });
+    state.settings.pageTheme = theme;
+    applyTheme(theme);
+  } catch (code) {
+    showError(`Could not change the theme (${code}).`);
+  }
 }
 
 async function refreshState() {
@@ -240,7 +270,12 @@ function shelfContent() {
   const now = new Date();
   const nodes = [];
   const current = state.books.find((b) => b.id === state.continueId);
-  if (current) nodes.push(continueCard(current, now));
+  nodes.push(h("div", { class: current ? "hero" : "hero hero-solo" },
+    current ? continueCard(current, now) : null,
+    h("div", { class: "hero-panel" },
+      h("h2", { class: "hero-greeting" }, greeting(now.getHours())),
+      h("p", { class: "hero-summary" }, shelfSummary(state.books)),
+      bookArt())));
   for (const [section, label] of SECTIONS) {
     const books = state.books.filter((b) => b.section === section && b.id !== state.continueId);
     if (books.length === 0) continue;
@@ -253,9 +288,21 @@ function shelfContent() {
 
 function emptyState(title, text, buttonLabel) {
   return h("section", { class: "empty-state" },
+    bookArt(),
     h("h2", {}, title),
     text ? h("p", {}, text) : null,
     h("button", { class: "btn", type: "button", onclick: pickFolder }, buttonLabel));
+}
+
+// First shelf after launch only: fade and rise in, 40 ms apart, 200 ms of delay at most.
+let intro = true;
+
+function riseIn(shelf) {
+  intro = false;
+  shelf.querySelectorAll(".hero, .section-title, .card").forEach((el, i) => {
+    el.style.setProperty("--rise-delay", `${Math.min(i * 40, 200)}ms`);
+    el.classList.add("rise");
+  });
 }
 
 function render() {
@@ -276,12 +323,14 @@ function render() {
   } else {
     const focusedKey = document.activeElement?.dataset?.key;
     shelf.replaceChildren(...shelfContent());
+    if (intro) riseIn(shelf);
     if (focusedKey) shelf.querySelector(`[data-key="${CSS.escape(focusedKey)}"]`)?.focus();
   }
 }
 
 async function start() {
   $("change-folder").addEventListener("click", pickFolder);
+  $("theme-toggle").addEventListener("click", toggleTheme);
   $("notice-dismiss").addEventListener("click", dismissNotice);
   try {
     await refreshState();

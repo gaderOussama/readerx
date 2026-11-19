@@ -9,3 +9,11 @@ export function h(tag, attrs = {}, ...children) {
   el.append(...children.filter((c) => c != null));
   return el;
 }
+
+// Same as h() for SVG elements.
+export function s(tag, attrs = {}, ...children) {
+  const el = document.createElementNS("http://www.w3.org/2000/svg", tag);
+  for (const [name, value] of Object.entries(attrs)) el.setAttribute(name, value);
+  el.append(...children.filter((c) => c != null));
+  return el;
+}

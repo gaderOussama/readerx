@@ -71,6 +71,8 @@ h1, h2, h3, p { margin: 0; }
   padding: 28px 56px;
   border-bottom: 1px solid var(--line);
 }
+.header-actions { display: flex; align-items: center; gap: 12px; }
+.icon-btn { display: inline-flex; align-items: center; justify-content: center; width: 34px; height: 34px; padding: 0; }
 .header h1 { font-size: 15px; font-weight: 600; letter-spacing: 0.16em; text-transform: uppercase; }
 
 .notice {
@@ -92,11 +94,35 @@ h1, h2, h3, p { margin: 0; }
   margin: 18vh auto 0;
   text-align: center;
 }
+.empty-state .book-art { display: block; margin: 0 auto 28px; }
 .empty-state h2 { font-size: 22px; font-weight: 600; margin-bottom: 8px; }
 .empty-state p { color: var(--muted); margin-bottom: 20px; overflow-wrap: anywhere; }
 
+/* Hero: Continue card on the left, greeting and book on the right */
+.hero { display: flex; align-items: stretch; gap: 56px; margin-bottom: 64px; }
+.hero-panel { flex: 1; min-width: 0; display: flex; flex-direction: column; justify-content: center; align-items: flex-start; }
+.hero-solo .hero-panel { flex: none; }
+.hero-greeting { font-size: 34px; font-weight: 300; line-height: 1.2; letter-spacing: -0.01em; }
+.hero-summary { margin-top: 6px; color: var(--muted); }
+.hero-panel .book-art { margin-top: 28px; }
+@media (max-width: 999px) {
+  .hero-panel { display: none; }
+  .hero-solo { display: none; }
+}
+
+/* Open book: the right page turns over, rests, turns back; about 9 s */
+.book-art { display: block; max-width: 100%; height: auto; overflow: visible; }
+.book-art path { fill: var(--bg); stroke: var(--muted); stroke-width: 1.5; stroke-linejoin: round; stroke-linecap: round; }
+.book-art .ln { fill: none; }
+.book-turn { transform-box: fill-box; transform-origin: 0 50%; animation: book-turn 9s ease-in-out infinite; }
+@keyframes book-turn {
+  0%, 25% { transform: scaleX(1); }
+  38%, 62% { transform: scaleX(-1); }
+  75%, 100% { transform: scaleX(1); }
+}
+
 /* Continue card */
-.continue { position: relative; max-width: 640px; margin-bottom: 64px; }
+.continue { position: relative; flex: 0 1 640px; min-width: 0; }
 .continue-open {
   display: flex;
   align-items: stretch;
@@ -214,7 +240,11 @@ h1, h2, h3, p { margin: 0; }
 .meta-chapter { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .meta-pct { flex: none; white-space: pre; }
 
+.card-open:hover .cover,
+.card-open:focus-visible .cover { border-color: var(--text); transform: translateY(-3px); }
+
 .cover {
+  transition: transform 150ms ease, border-color 150ms ease;
   aspect-ratio: 2 / 3;
   background: var(--surface);
   border: 1px solid var(--line);
@@ -245,6 +275,13 @@ h1, h2, h3, p { margin: 0; }
 
 .tile-note { color: var(--muted); font-size: 12.5px; font-weight: 400; }
 
+/* First shelf after launch: fade in and rise 8px */
+.rise { animation: rise 400ms ease-out backwards; animation-delay: var(--rise-delay, 0ms); }
+@keyframes rise {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: none; }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { transition: none !important; animation: none !important; scroll-behavior: auto !important; }
 }
@@ -269,6 +306,7 @@ h1, h2, h3, p { margin: 0; }
   border-bottom: 1px solid var(--line);
 }
 .reader-bar .btn { padding: 3px 12px; }
+.reader-bar .btn[aria-pressed="true"] { background: var(--text); color: var(--bg); }
 .reader-title {
   flex: 1;
   min-width: 0;
