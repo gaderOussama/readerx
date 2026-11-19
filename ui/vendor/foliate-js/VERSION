@@ -1,0 +1,5 @@
+foliate-js (MIT)
+https://github.com/johnfactotum/foliate-js
+commit 78914aef4466eb960965702401634c2cb348e9b1 (2026-05-01)
+Files copied unmodified: view.js epub.js epubcfi.js paginator.js fixed-layout.js overlayer.js progress.js search.js text-walker.js vendor/zip.js LICENSE.
+Left out on purpose (only reached by dynamic import for other formats or TTS): comic-book.js fb2.js mobi.js pdf.js tts.js vendor/fflate.js; demo, tests and rollup files.

@@ -13,6 +13,12 @@ export function relativeDay(isoString, now = new Date()) {
   return `${date.getDate()} ${MONTHS[date.getMonth()]} ${date.getFullYear()}`;
 }
 
+// EPUB shelf text in two parts, so the card can cut the chapter and keep the percent.
+export function epubProgressParts(book) {
+  if (!book.position) return null;
+  return { chapter: book.position.chapter || null, percent: `${Math.round(book.progress * 100)}%` };
+}
+
 export function progressText(book) {
   if (!book.position || !book.pageCount) return null;
   return `p. ${book.position.page} / ${book.pageCount} · ${Math.round(book.progress * 100)}%`;

@@ -9,7 +9,7 @@ pub mod watch;
 use chrono::Utc;
 use derive::{state_view, BookView, StateView};
 use highlights::{Books, Ctx, Highlight, Item};
-use library::{is_valid_id, lock, Position, Store};
+use library::{lock, Position, Store};
 use serde::Serialize;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::Sender;
@@ -90,7 +90,7 @@ fn save_position(
     state: State<Shared>,
     id: String,
     position: Position,
-    page_count: i64,
+    page_count: Option<i64>,
 ) -> Result<ops::Saved, String> {
     ops::save_position(&mut lock(&state.0), &id, position, page_count, Utc::now())
 }
@@ -100,9 +100,10 @@ fn set_meta(
     state: State<Shared>,
     id: String,
     meta_title: Option<String>,
-    page_count: i64,
+    meta_author: Option<String>,
+    page_count: Option<i64>,
 ) -> Result<(), String> {
-    ops::set_meta(&mut lock(&state.0), &id, meta_title, page_count)
+    ops::set_meta(&mut lock(&state.0), &id, meta_title, meta_author, page_count)
 }
 
 #[tauri::command(async)]
@@ -120,14 +121,9 @@ fn set_page_theme(state: State<Shared>, theme: String) -> Result<(), String> {
     ops::set_page_theme(&mut lock(&state.0), &theme)
 }
 
-/// The book's data folder and page count, or `unknown_book` (also for an id
-/// that is not the exact hash shape, so it never reaches a path).
-fn book_dir(state: &State<Shared>, id: &str) -> Result<(PathBuf, Option<u32>), String> {
-    let s = lock(&state.0);
-    match s.lib.books.get(id) {
-        Some(b) if is_valid_id(id) => Ok((s.dir.clone(), b.page_count)),
-        _ => Err("unknown_book".to_string()),
-    }
+#[tauri::command(async)]
+fn set_epub_settings(state: State<Shared>, font_size: i64, layout: String) -> Result<(), String> {
+    ops::set_epub_settings(&mut lock(&state.0), font_size, &layout)
 }
 
 #[derive(Serialize)]
@@ -157,7 +153,7 @@ fn get_highlights(
     exporter: State<Exporter>,
     id: String,
 ) -> Result<HighlightsOut, String> {
-    let (dir, pages) = book_dir(&state, &id)?;
+    let (dir, pages) = ops::highlight_book(&lock(&state.0), &id)?;
     let (export_folder, export_error) = {
         let s = lock(&state.0);
         (s.lib.settings.export_folder.clone(), s.lib.settings.export_errors.get(&id).cloned())
@@ -182,7 +178,7 @@ fn add_highlights(
     id: String,
     items: Vec<Item>,
 ) -> Result<HighlightList, String> {
-    let (dir, pages) = book_dir(&state, &id)?;
+    let (dir, pages) = ops::highlight_book(&lock(&state.0), &id)?;
     let highlights = highlights::add(&Ctx::new(&dir, &id, pages)?, &books, items, Utc::now())?;
     exporter.queue(&id);
     Ok(HighlightList { highlights })
@@ -197,7 +193,7 @@ fn set_note(
     highlight_id: String,
     note: String,
 ) -> Result<HighlightList, String> {
-    let (dir, pages) = book_dir(&state, &id)?;
+    let (dir, pages) = ops::highlight_book(&lock(&state.0), &id)?;
     let ctx = Ctx::new(&dir, &id, pages)?;
     let highlights = highlights::set_note(&ctx, &books, &highlight_id, &note, Utc::now())?;
     exporter.queue(&id);
@@ -212,7 +208,7 @@ fn delete_highlight(
     id: String,
     highlight_id: String,
 ) -> Result<HighlightList, String> {
-    let (dir, pages) = book_dir(&state, &id)?;
+    let (dir, pages) = ops::highlight_book(&lock(&state.0), &id)?;
     let ctx = Ctx::new(&dir, &id, pages)?;
     let highlights = highlights::delete(&ctx, &books, &highlight_id, Utc::now())?;
     exporter.queue(&id);
@@ -226,7 +222,7 @@ fn restore_highlight(
     exporter: State<Exporter>,
     id: String,
 ) -> Result<HighlightList, String> {
-    let (dir, pages) = book_dir(&state, &id)?;
+    let (dir, pages) = ops::highlight_book(&lock(&state.0), &id)?;
     let highlights = highlights::restore(&Ctx::new(&dir, &id, pages)?, &books, Utc::now())?;
     exporter.queue(&id);
     Ok(HighlightList { highlights })
@@ -310,6 +306,7 @@ pub fn run() {
             save_cover,
             set_finished,
             set_page_theme,
+            set_epub_settings,
             get_highlights,
             add_highlights,
             set_note,

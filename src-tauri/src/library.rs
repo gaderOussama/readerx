@@ -29,6 +29,33 @@ impl PageTheme {
     }
 }
 
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum EpubLayout {
+    Paginated,
+    Scrolled,
+}
+
+impl EpubLayout {
+    pub fn parse(s: &str) -> Option<Self> {
+        match s {
+            "paginated" => Some(Self::Paginated),
+            "scrolled" => Some(Self::Scrolled),
+            _ => None,
+        }
+    }
+}
+
+pub const EPUB_FONT_SIZES: [u32; 7] = [80, 90, 100, 115, 130, 160, 200];
+
+fn default_epub_font_size() -> u32 {
+    100
+}
+
+fn default_epub_layout() -> EpubLayout {
+    EpubLayout::Paginated
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct Settings {
@@ -41,6 +68,11 @@ pub struct Settings {
     /// Book id -> code of its last failed export; removed on the next success.
     #[serde(default)]
     pub export_errors: BTreeMap<String, String>,
+    /// Percent, one of `EPUB_FONT_SIZES`; one size for all EPUBs.
+    #[serde(default = "default_epub_font_size")]
+    pub epub_font_size: u32,
+    #[serde(default = "default_epub_layout")]
+    pub epub_layout: EpubLayout,
 }
 
 impl Default for Settings {
@@ -51,6 +83,8 @@ impl Default for Settings {
             page_theme: PageTheme::Paper,
             export_folder: None,
             export_errors: BTreeMap::new(),
+            epub_font_size: default_epub_font_size(),
+            epub_layout: default_epub_layout(),
         }
     }
 }
@@ -74,17 +108,30 @@ pub struct PdfPosition {
     pub at_end: bool,
 }
 
-/// Tagged so v3 can add `{ kind: "epub", cfi }` without touching old data.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct EpubPosition {
+    pub cfi: String,
+    pub fraction: f64,
+    /// The table of contents label at the spot.
+    pub chapter: Option<String>,
+    /// The reader was on the last page (Scroll mode reports it a screen early).
+    #[serde(default)]
+    pub at_end: bool,
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(tag = "kind", rename_all = "lowercase")]
 pub enum Position {
     Pdf(PdfPosition),
+    Epub(EpubPosition),
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum Format {
     Pdf,
+    Epub,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
@@ -103,6 +150,12 @@ pub struct Book {
     pub position: Option<Position>,
     pub progress: f64,
     pub finished_at: Option<String>,
+    /// From EPUB metadata; stays null for PDFs.
+    #[serde(default)]
+    pub meta_author: Option<String>,
+    /// True once `set_meta` ran: the cover probe never visits the book again.
+    #[serde(default)]
+    pub cover_checked: bool,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
@@ -120,7 +173,7 @@ pub struct Store {
     /// Ids whose file was found in the last scan. Never saved.
     pub present: HashSet<String>,
     pub folder_readable: bool,
-    pub pdf_count: usize,
+    pub book_count: usize,
 }
 
 impl Store {
@@ -132,7 +185,7 @@ impl Store {
             notice,
             present: HashSet::new(),
             folder_readable: false,
-            pdf_count: 0,
+            book_count: 0,
         }
     }
 
@@ -287,6 +340,8 @@ mod tests {
             })),
             progress: 0.2,
             finished_at: None,
+            meta_author: None,
+            cover_checked: false,
         }
     }
 
@@ -426,6 +481,49 @@ mod tests {
         assert_eq!(lib.settings.export_folder, None);
         assert!(lib.settings.export_errors.is_empty());
         assert_eq!(lib.settings.page_theme, PageTheme::Night);
+    }
+
+    #[test]
+    fn old_library_without_epub_fields_loads_with_defaults() {
+        let d = tempfile::tempdir().unwrap();
+        let id = format!("{}-3", "a".repeat(64));
+        let json = format!(
+            r#"{{"settings":{{"schemaVersion":1,"booksFolder":"D:/b","pageTheme":"night"}},"books":{{"{id}":{{"id":"{id}","path":"D:/b/a.pdf","fileName":"a.pdf","metaTitle":null,"format":"pdf","sizeBytes":3,"mtimeMs":1,"pageCount":10,"addedAt":"2026-11-16T09:05:07.000Z","lastOpenedAt":null,"position":null,"progress":0.0,"finishedAt":null}}}}}}"#
+        );
+        std::fs::write(library_path(d.path()), json).unwrap();
+        let (lib, notice) = load(d.path(), t0());
+        assert!(notice.is_none());
+        assert_eq!(lib.settings.epub_font_size, 100);
+        assert_eq!(lib.settings.epub_layout, EpubLayout::Paginated);
+        let b = &lib.books[&id];
+        assert_eq!(b.meta_author, None);
+        assert!(!b.cover_checked);
+    }
+
+    #[test]
+    fn epub_position_and_settings_serialize_with_the_contract_names() {
+        let d = tempfile::tempdir().unwrap();
+        let mut lib = Library::default();
+        let mut b = sample_book();
+        b.format = Format::Epub;
+        b.position = Some(Position::Epub(EpubPosition {
+            cfi: "epubcfi(/6/4!/4/2)".into(),
+            fraction: 0.5,
+            chapter: Some("Two".into()),
+            at_end: false,
+        }));
+        lib.books.insert(b.id.clone(), b.clone());
+        save(d.path(), &lib).unwrap();
+        let v: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(library_path(d.path())).unwrap()).unwrap();
+        assert_eq!(v["settings"]["epubFontSize"], 100);
+        assert_eq!(v["settings"]["epubLayout"], "paginated");
+        let book = &v["books"][&b.id];
+        assert_eq!(book["format"], "epub");
+        assert_eq!(book["position"]["kind"], "epub");
+        assert_eq!(book["position"]["cfi"], "epubcfi(/6/4!/4/2)");
+        assert_eq!(book["position"]["chapter"], "Two");
+        assert_eq!(load(d.path(), t0()).0, lib);
     }
 
     #[test]

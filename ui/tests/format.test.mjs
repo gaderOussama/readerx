@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { relativeDay, progressText } from "../lib/format.js";
+import { relativeDay, progressText, epubProgressParts } from "../lib/format.js";
 
 // Dates are built from local-time parts, so the tests hold in any time zone.
 const local = (y, mo, d, h = 0, mi = 0, s = 0) => new Date(y, mo - 1, d, h, mi, s);
@@ -88,4 +88,20 @@ test("progressText: null without a position or a page count", () => {
   assert.equal(progressText({ position: null, pageCount: 10, progress: 0 }), null);
   assert.equal(progressText({ position: { page: 3 }, pageCount: null, progress: 0.3 }), null);
   assert.equal(progressText({ position: null, pageCount: null, progress: 0 }), null);
+});
+
+test("epubProgressParts: chapter and rounded percent as separate parts", () => {
+  const book = { position: { kind: "epub", chapter: "Chapter 3" }, progress: 0.344 };
+  assert.deepEqual(epubProgressParts(book), { chapter: "Chapter 3", percent: "34%" });
+  assert.equal(epubProgressParts({ ...book, progress: 0.345 }).percent, "35%");
+});
+
+test("epubProgressParts: no chapter gives a null chapter, not an empty one", () => {
+  const at = (chapter) => epubProgressParts({ position: { kind: "epub", chapter }, progress: 0.5 });
+  assert.deepEqual(at(null), { chapter: null, percent: "50%" });
+  assert.equal(at("").chapter, null);
+});
+
+test("epubProgressParts: null for an unopened book", () => {
+  assert.equal(epubProgressParts({ position: null, progress: 0 }), null);
 });

@@ -20,6 +20,7 @@
     "allow-save-cover",
     "allow-set-finished",
     "allow-set-page-theme",
+    "allow-set-epub-settings",
     "allow-get-highlights",
     "allow-add-highlights",
     "allow-set-note",

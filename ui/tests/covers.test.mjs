@@ -17,6 +17,11 @@ test("needsProbe: a book that failed this session is skipped", () => {
   assert.equal(needsProbe(book({ id: "b" }), new Set(["a"])), true);
 });
 
+test("needsProbe: a book already checked (coverless EPUB) is never probed again", () => {
+  assert.equal(needsProbe(book({ coverChecked: true }), new Set()), false);
+  assert.equal(needsProbe(book({ coverChecked: false }), new Set()), true);
+});
+
 test("needsProbe: a book missing from the folder is skipped", () => {
   assert.equal(needsProbe(book({ present: false }), new Set()), false);
 });
